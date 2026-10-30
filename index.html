@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>3D Word Logo – TV Ident</title>
+<style>
+  /* Basic layout for the canvas and control panel. */
+  html, body { margin: 0; height: 100%; background: #111; font-family: Arial, sans-serif; color: #eee; }
+  #glcanvas { display: block; width: 100vw; height: 100vh; }
+  #debugPanel { position: fixed; top: 10px; left: 10px; background: rgba(0,0,0,.6); padding: 10px; border-radius: 6px; font-size: 13px; }
+  #debugPanel label { display: block; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<canvas id="glcanvas"></canvas>
+
+<!-- Controls for changing the word and its geometry. -->
+<div id="debugPanel">
+  <label>Word <input id="dbgWord" type="text" value="meow" maxlength="6" size="8"></label>
+  <label>Extrusion depth <input id="dbgDepth" type="range" min="0.1" max="1.5" step="0.05" value="0.4"></label>
+  <label>Letter spacing <input id="dbgSpacing" type="range" min="0" max="0.6" step="0.02" value="0.15"></label>
+</div>
+
+<script id="vertex-shader" type="x-shader/x-vertex">
+attribute vec3 aPosition;
+attribute vec4 aColor;
+uniform mat4 uModelView;
+uniform mat4 uProjection;
+varying vec4 vColor;
+void main() {
+  gl_Position = uProjection * uModelView * vec4(aPosition, 1.0);
+  vColor = aColor;
+}
+</script>
+
+<script id="fragment-shader" type="x-shader/x-fragment">
+precision mediump float;
+varying vec4 vColor;
+void main() { gl_FragColor = vColor; }
+</script>
+
+<script>
+"use strict";
+
+/* Transform state and user-adjustable settings. */
+
+// Current position, rotation, and scale of the logo.
+const state = {
+  theta: [0, 0, 0],        // rotation in degrees about X, Y, Z
+  scale: 1.0,              // uniform scale factor
+  translate: [0, 0, 0]     // translation in world units
+};
+
+// Values controlled by the panel and used when rebuilding the logo.
+const params = {
+  word: "meow",
+  depth: 0.4,              // extrusion depth (z thickness) of every letter
+  speed: 1.0,              // animation speed multiplier
+  spacing: 0.15,           // gap between letters
+  colorMode: "perLetter",  // "perLetter" | "single" | "rainbow"
+  letterColors: ["#e63946", "#f4a261", "#2a9d8f", "#457b9d"],
+  singleColor: "#e63946",
+  bgColor: "#111111",
+  isAnimating: false
+};
+
+/* Column-major matrix helpers used by WebGL. */
+
+function mat4Identity() {
+  return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+}
+
+// out = a * b   (apply b first, then a)
+function mat4Mul(a, b) {
+  const out = new Float32Array(16);
+  for (let c = 0; c < 4; c++)
+    for (let r = 0; r < 4; r++) {
+      let s = 0;
+      for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
+      out[c * 4 + r] = s;
+    }
+  return out;
+}
+
+function mat4Translate(x, y, z) {
+  const m = mat4Identity();
+  m[12] = x; m[13] = y; m[14] = z;
+  return m;
+}
+
+function mat4Scale(s) {
+  const m = mat4Identity();
+  m[0] = m[5] = m[10] = s;
+  return m;
+}
+
+function mat4RotateX(deg) {
+  const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r), m = mat4Identity();
+  m[5] = c; m[6] = s; m[9] = -s; m[10] = c;
+  return m;
+}
+
+function mat4RotateY(deg) {
+  const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r), m = mat4Identity();
+  m[0] = c; m[2] = -s; m[8] = s; m[10] = c;
+  return m;
+}
+
+function mat4RotateZ(deg) {
+  const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r), m = mat4Identity();
+  m[0] = c; m[1] = s; m[4] = -s; m[5] = c;
+  return m;
+}
+
+function mat4Perspective(fovyDeg, aspect, near, far) {
+  const f = 1 / Math.tan(fovyDeg * Math.PI / 360), nf = 1 / (near - far);
+  const m = new Float32Array(16);
+  m[0] = f / aspect; m[5] = f;
+  m[10] = (far + near) * nf; m[11] = -1;
+  m[14] = 2 * far * near * nf;
+  return m;
+}
+
+// "#rrggbb" -> [r, g, b] in 0..1
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
+}
+
+/* Bitmap glyphs and 3D geometry generation. */
+
+// Letters use bitmap rows; '#' cells become cuboids. M and W use five columns
+// so their diagonals remain distinct from H.
+const GLYPHS = {
+  A: [".#.", "#.#", "###", "#.#", "#.#"],
+  B: ["##.", "#.#", "##.", "#.#", "##."],
+  C: [".##", "#..", "#..", "#..", ".##"],
+  D: ["##.", "#.#", "#.#", "#.#", "##."],
+  E: ["###", "#..", "##.", "#..", "###"],
+  F: ["###", "#..", "##.", "#..", "#.."],
+  G: [".##", "#..", "#.#", "#.#", ".##"],
+  H: ["#.#", "#.#", "###", "#.#", "#.#"],
+  I: ["###", ".#.", ".#.", ".#.", "###"],
+  J: ["..#", "..#", "..#", "#.#", ".#."],
+  K: ["#.#", "#.#", "##.", "#.#", "#.#"],
+  L: ["#..", "#..", "#..", "#..", "###"],
+  M: ["#...#", "##.##", "#.#.#", "#...#", "#...#"],
+  N: ["###", "#.#", "#.#", "#.#", "#.#"],
+  O: ["###", "#.#", "#.#", "#.#", "###"],
+  P: ["###", "#.#", "###", "#..", "#.."],
+  Q: [".###..", "#...#.", "#...#.", "#..##.", ".##..#"],
+  R: ["##.", "#.#", "##.", "#.#", "#.#"],
+  S: [".##", "#..", ".#.", "..#", "##."],
+  T: ["###", ".#.", ".#.", ".#.", ".#."],
+  U: ["#.#", "#.#", "#.#", "#.#", "###"],
+  V: ["#.#", "#.#", "#.#", "#.#", ".#."],
+  W: ["#...#", "#...#", "#.#.#", "##.##", ".#.#."],
+  X: ["#.#", "#.#", ".#.", "#.#", "#.#"],
+  Y: ["#.#", "#.#", ".#.", ".#.", ".#."],
+  Z: ["###", "..#", ".#.", "#..", "###"]
+};
+
+const CELL = 0.2;                 // edge length of one bitmap cell (world units)
+const GLYPH_COLS = 3, GLYPH_ROWS = 5;
+const GLYPH_W = GLYPH_COLS * CELL; // 0.6
+const GLYPH_H = GLYPH_ROWS * CELL; // 1.0
+
+function getGlyphWidth(ch) {
+  const bitmap = GLYPHS[ch];
+  return (bitmap ? bitmap[0].length : GLYPH_COLS) * CELL;
+}
+
+// Per-face brightness multipliers provide simple shading without a lighting shader.
+const FACE_SHADE = { front: 1.0, right: 0.8, left: 0.7, top: 1.15, back: 0.55, bottom: 0.45 };
+
+// Vertex positions and colours uploaded to the GPU.
+let points = [];
+let colors = [];
+
+// Add two triangles for a quad whose vertices are ordered counter-clockwise.
+function pushQuad(a, b, c, d, rgb) {
+  for (const v of [a, b, c, a, c, d]) {
+    points.push(v[0], v[1], v[2]);
+    colors.push(rgb[0], rgb[1], rgb[2], 1.0);
+  }
+}
+
+// Keep shaded colour channels within the valid range.
+function shade(rgb, k) {
+  return [Math.min(rgb[0] * k, 1), Math.min(rgb[1] * k, 1), Math.min(rgb[2] * k, 1)];
+}
+
+/**
+ * Create one cuboid. (x, y, z) is the minimum corner; w/h/d are the sizes along x/y/z.
+ * 8 vertices are defined, then 6 quad faces are triangulated (12 triangles = 36 vertices).
+ */
+function createBox(x, y, z, w, h, d, baseRgb) {
+  const v = [
+    [x,     y,     z + d],  // 0 front bottom-left
+    [x + w, y,     z + d],  // 1 front bottom-right
+    [x + w, y + h, z + d],  // 2 front top-right
+    [x,     y + h, z + d],  // 3 front top-left
+    [x,     y,     z],      // 4 back  bottom-left
+    [x + w, y,     z],      // 5 back  bottom-right
+    [x + w, y + h, z],      // 6 back  top-right
+    [x,     y + h, z]       // 7 back  top-left
+  ];
+  pushQuad(v[0], v[1], v[2], v[3], shade(baseRgb, FACE_SHADE.front));
+  pushQuad(v[1], v[5], v[6], v[2], shade(baseRgb, FACE_SHADE.right));
+  pushQuad(v[5], v[4], v[7], v[6], shade(baseRgb, FACE_SHADE.back));
+  pushQuad(v[4], v[0], v[3], v[7], shade(baseRgb, FACE_SHADE.left));
+  pushQuad(v[3], v[2], v[6], v[7], shade(baseRgb, FACE_SHADE.top));
+  pushQuad(v[4], v[5], v[1], v[0], shade(baseRgb, FACE_SHADE.bottom));
+}
+
+// Build one letter by merging horizontal runs of '#' in each bitmap row into single boxes.
+function buildLetter(ch, x0, y0, z0, depth, rgb) {
+  const bitmap = GLYPHS[ch];
+  if (!bitmap) return;                          // Unsupported characters produce no geometry.
+  const columns = bitmap[0].length;
+  for (let row = 0; row < GLYPH_ROWS; row++) {
+    const y = y0 + (GLYPH_ROWS - 1 - row) * CELL; // row 0 is the TOP of the letter
+    let col = 0;
+    while (col < columns) {
+      if (bitmap[row][col] !== "#") { col++; continue; }
+      let run = 0;
+      while (col + run < columns && bitmap[row][col + run] === "#") run++;
+      createBox(x0 + col * CELL, y, z0, run * CELL, CELL, depth, rgb);
+      col += run;
+    }
+  }
+}
+
+// Select the colour assigned to a letter.
+function letterColor(i) {
+  if (params.colorMode === "single") return hexToRgb(params.singleColor);
+  return hexToRgb(params.letterColors[i % params.letterColors.length]);
+}
+
+/**
+ * Build the whole word, centred on the origin in x, y and z, so that rotations
+ * about the origin pivot around the middle of the logo.
+ */
+function buildWord() {
+  points = []; colors = [];
+  const word = params.word.toUpperCase();
+  const n = word.length;
+  const totalW = Array.from(word).reduce((width, ch) => width + getGlyphWidth(ch), 0)
+    + (n - 1) * params.spacing;
+  const xStart = -totalW / 2;
+  const yStart = -GLYPH_H / 2;
+  const zStart = -params.depth / 2;
+  let x = xStart;
+  for (let i = 0; i < n; i++) {
+    buildLetter(word[i], x, yStart, zStart, params.depth, letterColor(i));
+    x += getGlyphWidth(word[i]) + params.spacing;
+  }
+}
+
+// Return the word width for positioning and scaling.
+function getWordWidth() {
+  const word = params.word.toUpperCase();
+  return Array.from(word).reduce((width, ch) => width + getGlyphWidth(ch), 0)
+    + (word.length - 1) * params.spacing;
+}
+function getWordHeight() { return GLYPH_H; }
+
+/* WebGL setup and geometry buffers. */
+
+let gl, program, vBuffer, cBuffer;
+let uModelView, uProjection, aPosition, aColor;
+let vertexCount = 0;
+
+function compileShader(type, source) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, source);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+    throw new Error("Shader error: " + gl.getShaderInfoLog(s));
+  return s;
+}
+
+function initWebGL() {
+  const canvas = document.getElementById("glcanvas");
+  gl = canvas.getContext("webgl");
+  if (!gl) { alert("WebGL is not supported by this browser."); return false; }
+
+  program = gl.createProgram();
+  gl.attachShader(program, compileShader(gl.VERTEX_SHADER, document.getElementById("vertex-shader").text));
+  gl.attachShader(program, compileShader(gl.FRAGMENT_SHADER, document.getElementById("fragment-shader").text));
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS))
+    throw new Error("Link error: " + gl.getProgramInfoLog(program));
+  gl.useProgram(program);
+
+  aPosition = gl.getAttribLocation(program, "aPosition");
+  aColor = gl.getAttribLocation(program, "aColor");
+  uModelView = gl.getUniformLocation(program, "uModelView");
+  uProjection = gl.getUniformLocation(program, "uProjection");
+
+  vBuffer = gl.createBuffer();
+  cBuffer = gl.createBuffer();
+
+  gl.enable(gl.DEPTH_TEST);
+  gl.enable(gl.CULL_FACE);   // Skip faces pointing away from the camera.
+  return true;
+}
+
+// Rebuild the mesh and upload the updated buffers.
+function rebuildGeometry() {
+  buildWord();
+  vertexCount = points.length / 3;
+  gl.bindBuffer(gl.ARRAY_BUFFER, vBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(points), gl.STATIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, cBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+}
+
+// Keep the canvas pixel dimensions in sync with its displayed size.
+function resizeCanvas() {
+  const c = gl.canvas;
+  if (c.width !== c.clientWidth || c.height !== c.clientHeight) {
+    c.width = c.clientWidth; c.height = c.clientHeight;
+  }
+  gl.viewport(0, 0, c.width, c.height);
+}
+
+/* Rendering. */
+
+const CAMERA_Z = -5;   // Place the logo in front of the camera.
+
+// Apply scale, rotation, and translation to the model in that order.
+function buildModelView() {
+  let m = mat4Translate(state.translate[0], state.translate[1], state.translate[2] + CAMERA_Z);
+  m = mat4Mul(m, mat4RotateX(state.theta[0]));
+  m = mat4Mul(m, mat4RotateY(state.theta[1]));
+  m = mat4Mul(m, mat4RotateZ(state.theta[2]));
+  m = mat4Mul(m, mat4Scale(state.scale));
+  return m;
+}
+
+function drawLogo() {
+  const bg = hexToRgb(params.bgColor);
+  gl.clearColor(bg[0], bg[1], bg[2], 1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  const aspect = gl.canvas.width / gl.canvas.height;
+  gl.uniformMatrix4fv(uProjection, false, mat4Perspective(45, aspect, 0.1, 100));
+  gl.uniformMatrix4fv(uModelView, false, buildModelView());
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, vBuffer);
+  gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
+  gl.enableVertexAttribArray(aPosition);
+  gl.bindBuffer(gl.ARRAY_BUFFER, cBuffer);
+  gl.vertexAttribPointer(aColor, 4, gl.FLOAT, false, 0, 0);
+  gl.enableVertexAttribArray(aColor);
+
+  gl.drawArrays(gl.TRIANGLES, 0, vertexCount);
+}
+
+function render() {
+  resizeCanvas();
+  updateAnimation();
+  drawLogo();
+  requestAnimationFrame(render);
+}
+
+/* Animation update. */
+function updateAnimation() {
+  // Rotate slowly around the vertical axis.
+  state.theta[1] = (state.theta[1] + 0.4) % 360;
+}
+
+/* User interface event handlers. */
+function initUI() {
+  // Rebuild the mesh whenever a geometry setting changes.
+  document.getElementById("dbgWord").addEventListener("input", e => {
+    const w = e.target.value.toUpperCase().replace(/[^A-Z]/g, "");
+    if (w.length > 0) { params.word = w; rebuildGeometry(); }
+  });
+  document.getElementById("dbgDepth").addEventListener("input", e => {
+    params.depth = parseFloat(e.target.value); rebuildGeometry();
+  });
+  document.getElementById("dbgSpacing").addEventListener("input", e => {
+    params.spacing = parseFloat(e.target.value); rebuildGeometry();
+  });
+}
+
+/* Reserved for optional colour, lighting, keyboard, and reset controls. */
+function initExtensions() {}
+
+/* Start the WebGL scene and its controls. */
+window.onload = function () {
+  if (!initWebGL()) return;
+  initUI();
+  initExtensions();
+  resizeCanvas();
+  rebuildGeometry();
+  render();
+};
+window.addEventListener("resize", () => { if (gl) resizeCanvas(); });
+</script>
+</body>
+</html>
