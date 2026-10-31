@@ -4,30 +4,218 @@
 <meta charset="utf-8">
 <title>3D Word Logo – TV Ident</title>
 <style>
-  /* Basic layout for the canvas and control panel. */
-  html, body { margin: 0; height: 100%; background: #111; font-family: Arial, sans-serif; color: #eee; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #111;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    color: #f0f2f5;
+  }
   #glcanvas { display: block; width: 100vw; height: 100vh; }
-  #debugPanel { position: fixed; top: 10px; left: 10px; background: rgba(0,0,0,.6); padding: 10px; border-radius: 6px; font-size: 13px; }
-  #debugPanel label { display: block; margin-bottom: 6px; }
-  #debugPanel button { margin: 3px 4px 3px 0; padding: 4px 10px; cursor: pointer; }
-  #phaseDisplay { margin-top: 6px; font-size: 11px; opacity: 0.7; }
+
+  /* Studio Floating UI Panel */
+  #uiPanel {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    width: 280px;
+    background: rgba(18, 22, 34, 0.90);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+    font-size: 12px;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    box-sizing: border-box;
+    z-index: 100;
+  }
+
+  .panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 10px;
+    margin-bottom: 12px;
+  }
+  .panel-header h2 { margin: 0; font-size: 14px; font-weight: 700; color: #fff; letter-spacing: 0.5px; }
+
+  .status-badge {
+    padding: 2px 7px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .status-badge.ready { background: #2a9d8f; color: #fff; }
+  .status-badge.running { background: #e76f51; color: #fff; }
+  .status-badge.paused { background: #e9c46a; color: #222; }
+
+  .control-group { margin-bottom: 14px; }
+  .group-title { font-size: 10px; text-transform: uppercase; font-weight: 700; color: #8a99ad; margin-bottom: 8px; letter-spacing: 0.8px; }
+
+  .control-row { margin-bottom: 8px; }
+  .control-row label { display: block; margin-bottom: 3px; color: #d0d7de; }
+  .label-val { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; }
+  .val-badge { font-weight: 600; color: #58a6ff; font-family: monospace; font-size: 11px; }
+
+  input[type="text"], select {
+    width: 100%;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #fff;
+    padding: 6px 8px;
+    box-sizing: border-box;
+    font-size: 12px;
+  }
+  input[type="text"]:focus, select:focus { border-color: #58a6ff; outline: none; }
+
+  input[type="range"] {
+    width: 100%;
+    margin: 4px 0;
+    accent-color: #58a6ff;
+  }
+
+  input[type="color"] {
+    appearance: none;
+    -webkit-appearance: none;
+    border: none;
+    width: 100%;
+    height: 28px;
+    border-radius: 6px;
+    cursor: pointer;
+    background: transparent;
+  }
+  input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+  input[type="color"]::-webkit-color-swatch { border-radius: 6px; border: 1px solid #30363d; }
+
+  .palette-grid { display: flex; gap: 6px; }
+  .palette-grid input[type="color"] { flex: 1; height: 26px; }
+
+  .button-bar { display: flex; gap: 6px; margin-top: 10px; }
+  .button-bar button {
+    flex: 1;
+    padding: 7px 0;
+    border-radius: 6px;
+    border: none;
+    font-weight: 600;
+    font-size: 11px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  .btn-primary { background: #238636; color: #fff; }
+  .btn-primary:hover { background: #2ea043; }
+  .btn-secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d !important; }
+  .btn-secondary:hover { background: #30363d; }
+
+  #phaseDisplay {
+    margin-top: 8px;
+    font-size: 11px;
+    color: #8b949e;
+    text-align: center;
+    background: rgba(0, 0, 0, 0.25);
+    padding: 4px;
+    border-radius: 4px;
+    font-family: monospace;
+  }
+
+  /* Disabled styling when animation is running */
+  .control-group.disabled-while-running input,
+  .control-group.disabled-while-running select {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .input-hint {
+  font-size: 10px;
+  color: #8b949e;
+  margin-top: 4px;
+  line-height: 1.3;
+  }
 </style>
 </head>
 <body>
 <canvas id="glcanvas"></canvas>
 
-<!-- Controls for changing the word and its geometry. -->
-<div id="debugPanel">
-  <label>Word <input id="dbgWord" type="text" value="meow" maxlength="6" size="8"></label>
-  <label>Extrusion depth <input id="dbgDepth" type="range" min="0.1" max="1.5" step="0.05" value="0.4"></label>
-  <label>Letter spacing <input id="dbgSpacing" type="range" min="0" max="0.6" step="0.02" value="0.15"></label>
-  <label>Speed <input id="dbgSpeed" type="range" min="0.2" max="3.0" step="0.1" value="1.0"><span id="speedVal">1.0x</span></label>
-  <div>
-    <button id="btnStop">Stop</button>
-    <button id="btnStart">Start</button>
-    <button id="btnReset">Reset</button>
+<!-- User Interface & Control Panel -->
+<div id="uiPanel">
+  <div class="panel-header">
+    <h2>TV Ident Studio</h2>
+    <span id="badgeStatus" class="status-badge ready">READY</span>
   </div>
-  <div id="phaseDisplay">Phase: 0 – Waiting</div>
+
+  <!-- Text & Typography Settings -->
+  <div class="control-group">
+    <div class="group-title">Typography & Layout</div>
+    <div class="control-row">
+      <label for="inputWord">Word (Max 6)</label>
+      <input id="inputWord" type="text" value="meow" maxlength="6" spellcheck="false" autocomplete="off">
+      <div class="input-hint">Lowercase inputs automatically convert to 3D block capitals.</div>
+    </div>
+    <div class="control-row">
+      <div class="label-val"><label for="sliderSpacing">Letter Spacing</label><span id="valSpacing" class="val-badge">0.15</span></div>
+      <input id="sliderSpacing" type="range" min="0.0" max="0.5" step="0.02" value="0.15">
+    </div>
+  </div>
+
+  <!-- 3D Geometry Settings -->
+  <div class="control-group">
+    <div class="group-title">3D Extrusion</div>
+    <div class="control-row">
+      <div class="label-val"><label for="sliderDepth">Extrusion Depth</label><span id="valDepth" class="val-badge">0.40</span></div>
+      <input id="sliderDepth" type="range" min="0.1" max="1.5" step="0.05" value="0.4">
+    </div>
+  </div>
+
+  <!-- Color & Material Appearance -->
+  <div class="control-group">
+    <div class="group-title">Color & Appearance</div>
+    <div class="control-row">
+      <label for="selectColorMode">Color Mode</label>
+      <select id="selectColorMode">
+        <option value="perLetter">Per-Letter Palette</option>
+        <option value="single">Single Unified Color</option>
+        <option value="rainbow">Rainbow Cycle</option>
+      </select>
+    </div>
+    
+    <!-- Single Color Picker (Shown when single color mode is selected) -->
+    <div class="control-row" id="singleColorRow" style="display: none;">
+      <label for="pickerSingleColor">Logo Color</label>
+      <input id="pickerSingleColor" type="color" value="#e63946">
+    </div>
+
+    <!-- Per-Letter Dynamic Color Palette Pickers -->
+    <div class="control-row" id="paletteColorRow">
+      <label>Letter Colors</label>
+      <div id="paletteGrid" class="palette-grid"></div>
+    </div>
+
+    <div class="control-row">
+      <label for="pickerBgColor">Stage Background</label>
+      <input id="pickerBgColor" type="color" value="#111111">
+    </div>
+  </div>
+
+  <!-- Animation & Playback Controls -->
+  <div class="control-group">
+    <div class="group-title">Animation Controls</div>
+    <div class="control-row">
+      <div class="label-val"><label for="sliderSpeed">Playback Speed</label><span id="valSpeed" class="val-badge">1.0x</span></div>
+      <input id="sliderSpeed" type="range" min="0.2" max="3.0" step="0.1" value="1.0">
+    </div>
+    <div class="button-bar">
+      <button id="btnStart" class="btn-primary">Start</button>
+      <button id="btnStop" class="btn-secondary">Pause</button>
+      <button id="btnReset" class="btn-secondary">Reset</button>
+    </div>
+    <div id="phaseDisplay">Phase 0: Waiting</div>
+  </div>
 </div>
 
 <script id="vertex-shader" type="x-shader/x-vertex">
@@ -67,7 +255,8 @@ const params = {
   speed: 1.0,              // animation speed multiplier
   spacing: 0.15,           // gap between letters
   colorMode: "perLetter",  // "perLetter" | "single" | "rainbow"
-  letterColors: ["#e63946", "#f4a261", "#2a9d8f", "#457b9d"],
+  // 6 distinct defaults for letters 1 to 6
+  letterColors: ["#e63946", "#f4a261", "#2a9d8f", "#457b9d", "#9b5de5", "#f15bb5"],
   singleColor: "#e63946",
   bgColor: "#111111",
   isAnimating: false
@@ -400,7 +589,7 @@ const PHASE_NAMES = [
 const anim = {
   phase: 0,   // current step in PHASE_NAMES
   t: 0,       // elapsed progress within the step
-  running: true
+  running: false
 };
 
 let _lastTimestamp = null;
@@ -514,49 +703,167 @@ function updatePhaseDisplay() {
 }
 
 /* User interface event handlers. */
+function renderPalettePickers() {
+  const container = document.getElementById("paletteGrid");
+  if (!container) return;
+  container.innerHTML = "";
+
+  const word = params.word || "MEOW";
+
+  for (let i = 0; i < word.length; i++) {
+    const input = document.createElement("input");
+    input.type = "color";
+    input.value = params.letterColors[i];
+    input.title = `Color for "${word[i]}" (Letter ${i + 1})`;
+    
+    input.addEventListener("input", e => {
+      params.letterColors[i] = e.target.value;
+      if (params.colorMode === "perLetter") rebuildGeometry();
+    });
+    
+    container.appendChild(input);
+  }
+}
+
 function initUI() {
-  // Rebuild the mesh whenever a geometry setting changes.
-  document.getElementById("dbgWord").addEventListener("input", e => {
-    const w = e.target.value.toUpperCase().replace(/[^A-Z]/g, "");
-    if (w.length > 0) { params.word = w; rebuildGeometry(); }
-  });
-  document.getElementById("dbgDepth").addEventListener("input", e => {
-    params.depth = parseFloat(e.target.value); rebuildGeometry();
-  });
-  document.getElementById("dbgSpacing").addEventListener("input", e => {
-    params.spacing = parseFloat(e.target.value); rebuildGeometry();
+  const $ = id => document.getElementById(id);
+
+  // 1. Text input listener (filters valid letters only)
+  $("inputWord").addEventListener("input", e => {
+    const sanitized = e.target.value.toUpperCase().replace(/[^A-Z]/g, "");
+    if (sanitized.length > 0) {
+      params.word = sanitized;
+      renderPalettePickers(); // Rebuilds dynamic swatches to match letter count
+      rebuildGeometry();
+    }
   });
 
-  // Speed slider — adjusts how fast the animation phases play.
-  document.getElementById("dbgSpeed").addEventListener("input", e => {
+  // Populate dynamic pickers on initial setup
+  renderPalettePickers();
+
+  // 2. Extrusion Depth slider listener
+  $("sliderDepth").addEventListener("input", e => {
+    params.depth = parseFloat(e.target.value);
+    $("valDepth").textContent = params.depth.toFixed(2);
+    rebuildGeometry();
+  });
+
+  // 3. Spacing slider listener
+  $("sliderSpacing").addEventListener("input", e => {
+    params.spacing = parseFloat(e.target.value);
+    $("valSpacing").textContent = params.spacing.toFixed(2);
+    rebuildGeometry();
+  });
+
+  // 4. Animation Speed slider listener
+  $("sliderSpeed").addEventListener("input", e => {
     params.speed = parseFloat(e.target.value);
-    document.getElementById("speedVal").textContent = params.speed.toFixed(1) + "x";
+    $("valSpeed").textContent = params.speed.toFixed(1) + "x";
   });
 
-  // Stop, resume, or restart the animation.
-  document.getElementById("btnStop").addEventListener("click", () => {
-    anim.running = false;
-    updatePhaseDisplay();
+  // 5. Color Mode Dropdown listener
+  $("selectColorMode").addEventListener("change", e => {
+    params.colorMode = e.target.value;
+    if (params.colorMode === "single") {
+      $("singleColorRow").style.display = "block";
+      $("paletteColorRow").style.display = "none";
+    } else {
+      $("singleColorRow").style.display = "none";
+      $("paletteColorRow").style.display = "block";
+    }
+    rebuildGeometry();
   });
 
-  document.getElementById("btnStart").addEventListener("click", () => {
-    anim.running = true;
-    _lastTimestamp = null;    // prevent a time-jump after being paused
-    updatePhaseDisplay();
+  // 6. Unified Single Color Picker
+  $("pickerSingleColor").addEventListener("input", e => {
+    params.singleColor = e.target.value;
+    if (params.colorMode === "single") rebuildGeometry();
   });
 
-  document.getElementById("btnReset").addEventListener("click", () => {
-    anim.phase   = 0;
-    anim.t       = 0;
+  // 7. Stage Background Color Picker
+  const bgPicker = $("pickerBgColor");
+  if (bgPicker) {
+    bgPicker.addEventListener("input", e => {
+      params.bgColor = e.target.value;
+    });
+  }
+
+  // 8. Playback Buttons with Status Badges and Parameter Locking
+  $("btnStart").addEventListener("click", () => {
     anim.running = true;
     _lastTimestamp = null;
+    setControlsLocked(true);
+    setStatusBadge("running", "RUNNING");
+    updatePhaseDisplay();
+  });
+
+  $("btnStop").addEventListener("click", () => {
+    anim.running = false;
+    setControlsLocked(false);
+    setStatusBadge("paused", "PAUSED");
+    updatePhaseDisplay();
+  });
+
+  $("btnReset").addEventListener("click", () => {
+    anim.phase = 0;
+    anim.t = 0;
+    anim.running = false;
+    _lastTimestamp = null;
     resetAnimationState();
+    setControlsLocked(false);
+    setStatusBadge("ready", "READY");
     updatePhaseDisplay();
   });
 }
 
+// Visual status badge helper
+function setStatusBadge(className, label) {
+  const badge = document.getElementById("badgeStatus");
+  if (badge) {
+    badge.className = "status-badge " + className;
+    badge.textContent = label;
+  }
+}
+
+// Lock/unlock geometry controls while animating to prevent visual glitches
+function setControlsLocked(locked) {
+  ["inputWord", "sliderDepth", "sliderSpacing", "selectColorMode"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = locked;
+  });
+  const groups = document.querySelectorAll(".control-group");
+  if (groups.length > 0) {
+    groups[0].classList.toggle("disabled-while-running", locked);
+    groups[1].classList.toggle("disabled-while-running", locked);
+  }
+}
+
 /* Reserved for optional colour, lighting, keyboard, and reset controls. */
-function initExtensions() {}
+function initExtensions() {
+  /* Attach keyboard shortcuts for playback control */
+  window.addEventListener("keydown", e => {
+    // Never intercept keys when the user is actively typing in the text field
+    if (e.target && e.target.tagName === "INPUT" && e.target.type === "text") return;
+
+    if (e.code === "Space") {
+      e.preventDefault(); // Prevents page scrolling down
+      anim.running = !anim.running;
+      if (anim.running) _lastTimestamp = null;
+      setControlsLocked(anim.running);
+      setStatusBadge(anim.running ? "running" : "paused", anim.running ? "RUNNING" : "PAUSED");
+      updatePhaseDisplay();
+    } else if (e.key === "r" || e.key === "R") {
+      anim.phase = 0;
+      anim.t = 0;
+      anim.running = false;
+      _lastTimestamp = null;
+      resetAnimationState();
+      setControlsLocked(false);
+      setStatusBadge("ready", "READY");
+      updatePhaseDisplay();
+    }
+  });
+}
 
 /* Start the WebGL scene and its controls. */
 window.onload = function () {
