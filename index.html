@@ -9,6 +9,8 @@
   #glcanvas { display: block; width: 100vw; height: 100vh; }
   #debugPanel { position: fixed; top: 10px; left: 10px; background: rgba(0,0,0,.6); padding: 10px; border-radius: 6px; font-size: 13px; }
   #debugPanel label { display: block; margin-bottom: 6px; }
+  #debugPanel button { margin: 3px 4px 3px 0; padding: 4px 10px; cursor: pointer; }
+  #phaseDisplay { margin-top: 6px; font-size: 11px; opacity: 0.7; }
 </style>
 </head>
 <body>
@@ -19,6 +21,13 @@
   <label>Word <input id="dbgWord" type="text" value="meow" maxlength="6" size="8"></label>
   <label>Extrusion depth <input id="dbgDepth" type="range" min="0.1" max="1.5" step="0.05" value="0.4"></label>
   <label>Letter spacing <input id="dbgSpacing" type="range" min="0" max="0.6" step="0.02" value="0.15"></label>
+  <label>Speed <input id="dbgSpeed" type="range" min="0.2" max="3.0" step="0.1" value="1.0"><span id="speedVal">1.0x</span></label>
+  <div>
+    <button id="btnStop">Stop</button>
+    <button id="btnStart">Start</button>
+    <button id="btnReset">Reset</button>
+  </div>
+  <div id="phaseDisplay">Phase: 0 – Waiting</div>
 </div>
 
 <script id="vertex-shader" type="x-shader/x-vertex">
@@ -358,17 +367,314 @@ function drawLogo() {
   gl.drawArrays(gl.TRIANGLES, 0, vertexCount);
 }
 
-function render() {
+function render(timestamp) {
   resizeCanvas();
-  updateAnimation();
+  updateAnimation(timestamp);
   drawLogo();
   requestAnimationFrame(render);
 }
 
-/* Animation update. */
-function updateAnimation() {
-  // Rotate slowly around the vertical axis.
-  state.theta[1] = (state.theta[1] + 0.4) % 360;
+/* ============================================================================
+ * Animation State Machine 
+ * ============================================================================
+ *
+ * This section implements the full TV Ident animation sequence as specified in Objective (i) of the brief.
+ *
+ * SEQUENCE (continuous loop):
+ * ──────────────────────────────────────────────────────────────────────────
+ *   Phase 0 │ Start      │ Logo rests at center in its original orientation
+ *   Phase 1 │ Rotate R   │ Rotate RIGHT  by 180° around the Y-axis (0 → +180)
+ *   Phase 2 │ Return     │ Rotate back to original orientation    (+180 →  0)
+ *   Phase 3 │ Rotate L   │ Rotate LEFT   by 180° around the Y-axis (0 → -180)
+ *   Phase 4 │ Return     │ Rotate back to original orientation    (-180 →  0)
+ *   Phase 5 │ Scale Up   │ Gradually enlarge to fill ~85% of the viewport
+ *   Phase 6 │ Hover Loop │ Gentle continuous rotation + vertical bob + X tilt
+ *            └─ loops back to Phase 0 after HOVER_DURATION_SECS seconds ──┘
+ *
+ * KEY DESIGN DECISIONS:
+ *   • Delta-time (dt) makes the speed frame-rate independent (same on 30fps/144fps).
+ *   • easeInOut() applies cubic smooth-step so every phase starts/ends smoothly.
+ *   • getMaxScaleToFit() uses the perspective projection formula so "full-screen"
+ *     is mathematically correct regardless of window size or word length.
+ *   • Snap values are applied at phase boundaries to eliminate floating-point drift.
+ *   • params.speed (UI slider) scales every phase uniformly.
+ *
+ * OPTIONAL CHALLENGE (Obj. i, step 8):
+ *   Stop / Start / Reset buttons let the user pause or restart the sequence.
+ *
+ * ============================================================================ */
+
+// ── Animation timing constants ───────────────────────────────────────────────
+const PHASE_BASE_SECS     = 1.5;   // wall-clock seconds for each rotation/scale phase at speed 1×
+const HOVER_DURATION_SECS = 4.0;   // seconds the hover loop plays before cycling back to Phase 0
+const START_HOLD_SECS     = 0.3;   // brief pause in Phase 0 so the logo is visible before moving
+
+// Human-readable labels used by the phase display and helpful for the viva.
+const PHASE_NAMES = [
+  "Start – holding at center",         // 0
+  "Rotate Right 180°",                 // 1  (spec step 2)
+  "Return to Original Orientation",    // 2  (spec step 3)
+  "Rotate Left 180°",                  // 3  (spec step 4)
+  "Return to Original Orientation",    // 4  (spec step 5)
+  "Scale Up to Full-Screen",           // 5  (spec step 6)
+  "Hover / Move About (loop)"          // 6  (spec step 7)
+];
+
+// ── Animation controller object ──────────────────────────────────────────────
+// All mutable animation state lives here so it is easy to inspect and reset.
+const anim = {
+  phase:   0,     // index into PHASE_NAMES; drives the switch in updateAnimation()
+  t:       0,     // normalised progress within the current phase: 0.0 = start, 1.0 = end
+  running: true   // set to false by the Stop button; prevents updateAnimation() from ticking
+};
+
+// Stores the DOMHighResTimeStamp of the previous frame so dt can be computed.
+// Null means "first frame — do not compute dt yet".
+let _lastTimestamp = null;
+
+/* ── Helper: easeInOut(t) ────────────────────────────────────────────────────
+ *
+ * Applies cubic Hermite smooth-step to a linear [0,1] input, producing an
+ * output that accelerates from 0, peaks in the middle, then decelerates to 1.
+ *
+ *   f(t) = 3t² - 2t³
+ *
+ * Without easing, rotations start and stop abruptly (looks mechanical).
+ * With easing, they feel physically natural, like a real broadcast ident.
+ *
+ * @param  {number} t  Linear progress in [0, 1].
+ * @return {number}    Eased progress in [0, 1].
+ * ─────────────────────────────────────────────────────────────────────────── */
+function easeInOut(t) {
+  return t * t * (3 - 2 * t);   // cubic smooth-step (Hermite basis)
+}
+
+/* ── Helper: getMaxScaleToFit() ──────────────────────────────────────────────
+ *
+ * Computes the uniform scale factor S such that the logo occupies exactly
+ * TARGET_FILL (85%) of the visible viewport at the current window size.
+ *
+ * DERIVATION (perspective geometry):
+ *   The camera is placed at z = CAMERA_Z = -5.  With a 45° vertical FOV,
+ *   the half-angle is 22.5°.  The visible world-space height at the origin
+ *   plane (z = 0) is:
+ *
+ *       visH = 2 × |CAMERA_Z| × tan(FOV / 2)
+ *            = 2 × 5 × tan(22.5°)
+ *            ≈ 4.14 world units
+ *
+ *   visW = visH × aspect   (widens on landscape screens)
+ *
+ *   We compute the scale that fills 85% of the screen in BOTH dimensions and
+ *   take the minimum, so the logo is always fully visible (letterbox-safe).
+ *
+ *       sx = (visW × 0.85) / wordWidth
+ *       sy = (visH × 0.85) / wordHeight
+ *       S  = min(sx, sy)
+ *
+ * Called every frame in Phase 5 (scale-up) and Phase 6 (hover) so that
+ * window resizing during the animation stays correct.
+ *
+ * @return {number}  The scale factor that fills ~85% of the viewport.
+ * ─────────────────────────────────────────────────────────────────────────── */
+function getMaxScaleToFit() {
+  const aspect = gl.canvas.width / gl.canvas.height;            // current window ratio
+  const visH   = 2 * Math.abs(CAMERA_Z) * Math.tan(45 * Math.PI / 360); // world-space visible height
+  const visW   = visH * aspect;                                 // world-space visible width
+  const sx     = (visW * 0.85) / getWordWidth();                // scale to fill 85% horizontally
+  const sy     = (visH * 0.85) / getWordHeight();               // scale to fill 85% vertically
+  return Math.min(sx, sy);   // use the smaller: logo stays entirely on screen
+}
+
+/* ── Helper: resetAnimationState() ──────────────────────────────────────────
+ *
+ * Restores all transform values in `state` to their initial defaults so the
+ * logo appears at the center of the window, unrotated and unscaled.
+ * Called at the end of Phase 6 so the loop restarts cleanly from Phase 0,
+ * and by the Reset button so the user can restart at any time.
+ * ─────────────────────────────────────────────────────────────────────────── */
+function resetAnimationState() {
+  state.theta[0]     = 0;    // X rotation — clear any hover tilt
+  state.theta[1]     = 0;    // Y rotation — clear any spin
+  state.theta[2]     = 0;    // Z rotation — clear any roll
+  state.scale        = 1.0;  // return to unit scale
+  state.translate[0] = 0;    // center horizontally
+  state.translate[1] = 0;    // center vertically (clears the bob offset)
+  state.translate[2] = 0;    // no depth offset
+}
+
+/* ── Core: updateAnimation(timestamp) ───────────────────────────────────────
+ *
+ * Called once per frame by render() with the DOMHighResTimeStamp provided
+ * by requestAnimationFrame.  This is the heart of Angela's animation work.
+ *
+ * HOW IT WORKS:
+ *   1. Compute delta-time (dt) in seconds from the previous frame timestamp.
+ *      dt is capped at 0.1 s to prevent the animation jumping if the browser
+ *      tab was hidden and then made active again.
+ *
+ *   2. Advance anim.t by (dt × speed / phaseDuration).
+ *      When anim.t reaches 1.0 the phase is complete.
+ *
+ *   3. Compute eased progress: et = easeInOut(clamp(t, 0, 1)).
+ *      All transforms are driven by et, not raw t, for smooth motion.
+ *
+ *   4. A switch statement maps each phase index to the correct transform:
+ *      • Phases 1–4  → state.theta[1]  (Y-axis rotation, degrees)
+ *      • Phase  5    → state.scale     (uniform scale factor)
+ *      • Phase  6    → ongoing Y spin + sine-wave bob + X tilt (hover loop)
+ *
+ *   5. At phase end, exact snap values overwrite the eased result to prevent
+ *      floating-point accumulation from drifting away from 0° / 180° etc.
+ *
+ * @param {DOMHighResTimeStamp} timestamp  Time in milliseconds from RAF.
+ * ─────────────────────────────────────────────────────────────────────────── */
+function updateAnimation(timestamp) {
+
+  // Guard: do nothing if the animation is paused or if timestamp is invalid
+  // (the very first call from window.onload passes no timestamp argument).
+  if (!anim.running || !timestamp) return; 
+
+  // ── 1. Compute delta-time ─────────────────────────────────────────────────
+  if (_lastTimestamp === null) _lastTimestamp = timestamp;   // initialise on first valid frame
+  const dt = Math.min((timestamp - _lastTimestamp) / 1000, 0.1);  // seconds, max 0.1
+  _lastTimestamp = timestamp;
+
+  // ── 2. Phase 0: Start — hold at center for a short moment then begin. ────
+  // The logo is visible in its original orientation; this pause lets the
+  // viewer register the starting state before the rotation begins.
+  if (anim.phase === 0) {
+    anim.t += dt * params.speed / START_HOLD_SECS;
+    if (anim.t >= 1) { anim.t = 0; anim.phase = 1; }   // advance to rotate-right
+    updatePhaseDisplay();
+    return;
+  }
+
+  // ── 3. Phases 1–5: Rotation and scale-up with smooth easing. ─────────────
+  //
+  // For each phase:
+  //   • anim.t tracks raw (linear) progress from 0 → 1 over PHASE_BASE_SECS.
+  //   • et = easeInOut(t) gives the eased (curved) progress used for the transform.
+  //   • On completion (t ≥ 1), a snap value eliminates floating-point error.
+  //
+  if (anim.phase >= 1 && anim.phase <= 5) {
+    anim.t += dt * params.speed / PHASE_BASE_SECS;         // advance linear progress
+    const et = easeInOut(Math.min(anim.t, 1));             // apply ease, clamp to [0,1]
+
+    switch (anim.phase) {
+
+      // ── Phase 1: Rotate RIGHT by 180° (spec step 2) ─────────────────────
+      // Y-angle goes from 0° to +180° as et goes from 0 to 1.
+      // Positive Y is a right-hand rotation around the up-axis (counter-clockwise
+      // from above), which appears to rotate the logo to the right on screen.
+      case 1:
+        state.theta[1] = et * 180;
+        break;
+
+      // ── Phase 2: Return to original orientation (spec step 3) ────────────
+      // Y-angle goes from +180° back to 0°.
+      // (1 - et) reverses the direction of the interpolation.
+      case 2:
+        state.theta[1] = (1 - et) * 180;
+        break;
+
+      // ── Phase 3: Rotate LEFT by 180° (spec step 4) ──────────────────────
+      // Y-angle goes from 0° to -180°.
+      // Negative Y rotation is the mirror of phase 1, turning left on screen.
+      case 3:
+        state.theta[1] = -et * 180;
+        break;
+
+      // ── Phase 4: Return to original orientation (spec step 5) ────────────
+      // Y-angle goes from -180° back to 0°.
+      // -(1-et) * 180 interpolates from -180 → 0.
+      case 4:
+        state.theta[1] = -(1 - et) * 180;
+        break;
+
+      // ── Phase 5: Scale up to fill the viewport (spec step 6) ─────────────
+      // state.scale linearly interpolates from 1.0 (original size) to
+      // getMaxScaleToFit() (the mathematically computed full-screen scale).
+      // easing makes the growth start slowly and decelerate into the final size.
+      case 5:
+        state.scale = 1 + et * (getMaxScaleToFit() - 1);
+        break;
+    }
+
+    // ── End-of-phase: snap to exact values and advance the phase counter. ──
+    if (anim.t >= 1) {
+      // Overwrite the eased value with the exact target to prevent drift.
+      switch (anim.phase) {
+        case 1: state.theta[1] =  180;               break;  // exactly +180°
+        case 2: state.theta[1] =    0;               break;  // exactly 0°
+        case 3: state.theta[1] = -180;               break;  // exactly -180°
+        case 4: state.theta[1] =    0;               break;  // exactly 0°
+        case 5: state.scale    = getMaxScaleToFit(); break;  // exact full-screen scale
+      }
+      anim.t = 0;        // reset progress for the next phase
+      anim.phase++;      // move to the next step in the sequence
+    }
+
+    updatePhaseDisplay();
+    return;
+  }
+
+  // ── 4. Phase 6: Hover / "Move About" loop (spec step 7) ──────────────────
+  //
+  // After enlarging, the logo gently "moves about" in a continuous loop:
+  //   • Slow Y spin     — continuous rotation at 20°/s (feels like a broadcast ident).
+  //   • Vertical bob    — sine-wave on translate[1] (period ~3.8 s at 600 ms/rad).
+  //   • Subtle X tilt   — sine-wave on theta[0]    (period ~7.5 s at 1200 ms/rad),
+  //                        adds depth and keeps the 3D extrusion visible.
+  //
+  // After HOVER_DURATION_SECS the sequence loops: resetAnimationState() snaps
+  // every transform back to defaults and the cycle restarts from Phase 0.
+  //
+  if (anim.phase === 6) {
+
+    // Hold the full-screen scale computed at the end of Phase 5.
+    // Re-calling getMaxScaleToFit() every frame keeps it correct if the window is resized.
+    state.scale = getMaxScaleToFit();
+
+    // Continuous slow Y rotation — 20 degrees per second × speed multiplier.
+    // Using dt (not timestamp) so the rate is frame-rate independent.
+    state.theta[1] += dt * 20 * params.speed;
+
+    // Gentle vertical bob — amplitude 0.15 world units, period ≈ 3.77 s.
+    // Math.sin returns [-1, 1]; multiplying by 0.15 keeps the bob subtle.
+    state.translate[1] = Math.sin(timestamp / 600) * 0.15;
+
+    // Slight X-axis tilt — amplitude ±8°, period ≈ 7.54 s.
+    // This tilts the top/bottom of the logo towards the viewer, keeping
+    // the extruded depth visible throughout the hover phase.
+    state.theta[0] = Math.sin(timestamp / 1200) * 8;
+
+    // Advance the hover timer.  When it reaches 1 (after HOVER_DURATION_SECS),
+    // reset everything and restart the full sequence from Phase 0.
+    anim.t += dt * params.speed / HOVER_DURATION_SECS;
+    if (anim.t >= 1) {
+      anim.t     = 0;
+      anim.phase = 0;
+      resetAnimationState();   // clear all transforms; Phase 0 will hold them briefly
+    }
+
+    updatePhaseDisplay();
+    return;
+  }
+}
+
+/* ── Helper: updatePhaseDisplay() ───────────────────────────────────────────
+ *
+ * Writes the current phase index and human-readable name into the #phaseDisplay
+ * element in the control panel.  This lets the user (and the marker during the
+ * viva) see exactly which step of the animation is currently executing.
+ * ─────────────────────────────────────────────────────────────────────────── */
+function updatePhaseDisplay() {
+  const el = document.getElementById("phaseDisplay");
+  if (el) {
+    const name = PHASE_NAMES[anim.phase] || "Unknown";
+    el.textContent = "Phase " + anim.phase + ": " + name;
+  }
 }
 
 /* User interface event handlers. */
@@ -384,6 +690,33 @@ function initUI() {
   document.getElementById("dbgSpacing").addEventListener("input", e => {
     params.spacing = parseFloat(e.target.value); rebuildGeometry();
   });
+
+  // Speed slider — adjusts how fast the animation phases play.
+  document.getElementById("dbgSpeed").addEventListener("input", e => {
+    params.speed = parseFloat(e.target.value);
+    document.getElementById("speedVal").textContent = params.speed.toFixed(1) + "x";
+  });
+
+  // ── Stop / Start / Reset buttons (Angela – Optional Challenge) ─────────
+  document.getElementById("btnStop").addEventListener("click", () => {
+    anim.running = false;
+    updatePhaseDisplay();
+  });
+
+  document.getElementById("btnStart").addEventListener("click", () => {
+    anim.running = true;
+    _lastTimestamp = null;    // prevent a time-jump after being paused
+    updatePhaseDisplay();
+  });
+
+  document.getElementById("btnReset").addEventListener("click", () => {
+    anim.phase   = 0;
+    anim.t       = 0;
+    anim.running = true;
+    _lastTimestamp = null;
+    resetAnimationState();
+    updatePhaseDisplay();
+  });
 }
 
 /* Reserved for optional colour, lighting, keyboard, and reset controls. */
@@ -396,7 +729,7 @@ window.onload = function () {
   initExtensions();
   resizeCanvas();
   rebuildGeometry();
-  render();
+  requestAnimationFrame(render);   // pass timestamp correctly on first frame
 };
 window.addEventListener("resize", () => { if (gl) resizeCanvas(); });
 </script>
