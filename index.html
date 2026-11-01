@@ -218,9 +218,9 @@
       <button id="btnStart" class="btn-primary">Start</button>
       <button id="btnStop" class="btn-secondary">Pause</button>
       <button id="btnReset" class="btn-secondary">Reset</button>
-      <div class="button-bar">
-      <button id="btnResetDefaults" class="btn-secondary" style="width: 100%; margin-top: 4px;">Reset All Settings to Defaults</button></div>
     </div>
+      <button id="btnResetDefaults" class="btn-secondary" style="width: 100%; margin-top: 4px;">Reset All Settings to Defaults</button>
+
     <div id="phaseDisplay">Phase 0: Waiting</div>
   </div>
 </div>
@@ -1002,6 +1002,11 @@ function initExtensions() {
       if (chk) chk.checked = params.useLighting;
     }
   });
+
+  // 5. Window resize handling
+  window.addEventListener("resize", () => {
+    if (gl) resizeCanvas();
+  });
 }
 
 /* Start the WebGL scene and its controls. */
@@ -1013,7 +1018,6 @@ window.onload = function () {
   rebuildGeometry();
   requestAnimationFrame(render);   // pass timestamp correctly on first frame
 };
-window.addEventListener("resize", () => { if (gl) resizeCanvas(); });
 </script>
 </body>
 </html>
