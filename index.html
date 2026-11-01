@@ -853,6 +853,48 @@ function setControlsLocked(locked) {
   }
 }
 
+// Reset all user adjustable parameters and UI inputs to initial values
+function resetDefaults() {
+  // 1. Reset state & playback
+  anim.phase = 0;
+  anim.t = 0;
+  anim.running = false;
+  _lastTimestamp = null;
+  resetAnimationState();
+  setControlsLocked(false);
+  setStatusBadge("ready", "READY");
+  updatePhaseDisplay();
+
+  // 2. Reset parameter values
+  params.word = "meow";
+  params.depth = 0.40;
+  params.speed = 1.0;
+  params.spacing = 0.15;
+  params.colorMode = "perLetter";
+  params.letterColors = ["#e63946", "#f4a261", "#2a9d8f", "#457b9d", "#9b5de5", "#f15bb5"];
+  params.singleColor = "#e63946";
+  params.bgColor = "#111111";
+
+  // 3. Update DOM inputs
+  const $ = id => document.getElementById(id);
+  if ($("inputWord")) $("inputWord").value = "meow";
+  if ($("sliderDepth")) $("sliderDepth").value = 0.40;
+  if ($("valDepth")) $("valDepth").textContent = "0.40";
+  if ($("sliderSpacing")) $("sliderSpacing").value = 0.15;
+  if ($("valSpacing")) $("valSpacing").textContent = "0.15";
+  if ($("sliderSpeed")) $("sliderSpeed").value = 1.0;
+  if ($("valSpeed")) $("valSpeed").textContent = "1.0x";
+  if ($("selectColorMode")) $("selectColorMode").value = "perLetter";
+  if ($("pickerSingleColor")) $("pickerSingleColor").value = "#e63946";
+  if ($("pickerBgColor")) $("pickerBgColor").value = "#111111";
+  if ($("singleColorRow")) $("singleColorRow").style.display = "none";
+  if ($("paletteColorRow")) $("paletteColorRow").style.display = "block";
+
+  // 4. Re-render UI color palette pickers and rebuild WebGL geometry
+  renderPalettePickers();
+  rebuildGeometry();
+}
+
 /* Reserved for optional colour, lighting, keyboard, and reset controls. */
 function initExtensions() {
   /* Attach keyboard shortcuts for playback control */
