@@ -795,37 +795,60 @@ function updateAnimation(timestamp) {
   }
 
   if (anim.phase === 6) {
-    state.scale = getMaxScaleToFit();
     anim.t += dt * params.speed;
 
+    const baseScale = getMaxScaleToFit();
     const aspect = gl.canvas.width / gl.canvas.height;
     const visibleHeight = 2 * Math.abs(CAMERA_Z) * Math.tan(45 * Math.PI / 360);
     const visibleWidth = visibleHeight * aspect;
-    const moveX = Math.max(0, visibleWidth * 0.47 - getWordWidth() * state.scale / 2);
-    const moveY = Math.max(0, visibleHeight * 0.47 - getWordHeight() * state.scale / 2);
 
     if (params.animPath === "bounce") {
-      // Path 2: Harmonic bouncing with dynamic squashing/tilting
-      const bouncePeriod = 1.8;
-      const progress = (anim.t % bouncePeriod) / bouncePeriod;
-      // Parabolic vertical trajectory
-      state.translate[1] = (Math.abs(Math.sin(anim.t * 3.5)) * 2 - 1) * moveY;
-      state.translate[0] = Math.sin(anim.t * 1.2) * (moveX * 0.7);
-      state.theta[0] = Math.sin(anim.t * 3.5) * 12; // tilt on bounce
-      state.theta[2] = -Math.cos(anim.t * 1.2) * 8;
+      // Path 2: Dynamic Harmonic Bounce
+      // Scale slightly down to 85% of max fit to leave headroom for bouncing and tilt
+      state.scale = baseScale * 0.82;
+
+      // Safe bounds keeping the whole mesh inside visible frustum
+      const safeX = Math.max(0, (visibleWidth * 0.44) - (getWordWidth() * state.scale / 2));
+      const safeY = Math.max(0, (visibleHeight * 0.42) - (getWordHeight() * state.scale / 2));
+
+      // Bouncing parabolic arc
+      const bounceCycle = Math.abs(Math.sin(anim.t * 3.0));
+      state.translate[1] = (bounceCycle * 1.6 - 0.8) * safeY; // stays within safe vertical bounds
+      state.translate[0] = Math.sin(anim.t * 1.2) * (safeX * 0.75);
+
+      // Subtle tilt that remains inside view
+      state.theta[0] = Math.sin(anim.t * 3.0) * 10;
+      state.theta[1] = 0;
+      state.theta[2] = -Math.cos(anim.t * 1.2) * 6;
+
     } else if (params.animPath === "flip") {
-      // Path 3: Continuous 3D flipping with figure-8 infinity loop
-      state.translate[0] = Math.sin(anim.t * 1.5) * moveX;
-      state.translate[1] = Math.sin(anim.t * 3.0) * (moveY * 0.5); // Figure-8 Lissajous
-      state.theta[0] = (anim.t * 120) % 360;  // Continuous X tumble/flip
-      state.theta[1] = Math.sin(anim.t) * 30; // Subtle Y rocking
+      // Path 3: 3D Flip & Wave
+      // Extrusion depth projects forward/backward during 3D flip; scale to 75% to prevent clipping
+      state.scale = baseScale * 0.72;
+
+      const safeX = Math.max(0, (visibleWidth * 0.40) - (getWordWidth() * state.scale / 2));
+      const safeY = Math.max(0, (visibleHeight * 0.38) - (getWordHeight() * state.scale / 2));
+
+      // Smooth figure-8 Lissajous path centered safely inside window
+      state.translate[0] = Math.sin(anim.t * 1.4) * safeX;
+      state.translate[1] = Math.sin(anim.t * 2.8) * (safeY * 0.65);
+
+      // Continuous 3D tumble flip along X axis with subtle Y sway
+      state.theta[0] = (anim.t * 100) % 360;
+      state.theta[1] = Math.sin(anim.t * 1.2) * 20;
       state.theta[2] = 0;
+
     } else {
-      // Path 1 (Default): Smooth horizontal/vertical oval orbit
+      // Path 1 (Default): Original 6-phase sequence smooth oval translation loop
+      state.scale = baseScale;
+      const safeX = Math.max(0, (visibleWidth * 0.46) - (getWordWidth() * state.scale / 2));
+      const safeY = Math.max(0, (visibleHeight * 0.46) - (getWordHeight() * state.scale / 2));
+
       const angle = anim.t * 2 * Math.PI / 6;
-      state.translate[0] = Math.cos(angle) * moveX;
-      state.translate[1] = Math.sin(angle) * moveY;
+      state.translate[0] = Math.cos(angle) * safeX;
+      state.translate[1] = Math.sin(angle) * safeY;
       state.theta[0] = 0;
+      state.theta[1] = 0;
       state.theta[2] = 0;
     }
 
@@ -1068,6 +1091,10 @@ function initExtensions() {
   if (selectAnimPath) {
     selectAnimPath.addEventListener("change", e => {
       params.animPath = e.target.value;
+      if (params.animPath === "oval") {
+        state.theta[0] = 0;
+        state.theta[2] = 0;
+      }
     });
   }
 
@@ -1108,16 +1135,20 @@ function initExtensions() {
     // --- Animation Path 1 (Default Oval): Key 1 ---
     else if (e.key === "1") {
       params.animPath = "oval";
+      state.theta[0] = 0;
+      state.theta[2] = 0;
       if ($("selectAnimPath")) $("selectAnimPath").value = "oval";
     }
     // --- Animation Path 2 (Dynamic Bounce): Key 2 ---
     else if (e.key === "2") {
       params.animPath = "bounce";
+      state.theta[1] = 0;
       if ($("selectAnimPath")) $("selectAnimPath").value = "bounce";
     }
     // --- Animation Path 3 (3D Flip & Wave): Key 3 ---
     else if (e.key === "3") {
       params.animPath = "flip";
+      state.theta[2] = 0;
       if ($("selectAnimPath")) $("selectAnimPath").value = "flip";
     }
     // --- Extrusion Depth: [ / ] ---
