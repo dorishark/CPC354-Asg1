@@ -200,6 +200,11 @@
       <label for="pickerBgColor">Stage Background</label>
       <input id="pickerBgColor" type="color" value="#111111">
     </div>
+
+    <div class="control-row" style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+      <label for="checkLighting" style="margin: 0; cursor: pointer;">Enable Shading / Light</label>
+      <input id="checkLighting" type="checkbox" checked style="width: auto; cursor: pointer;">
+    </div>
   </div>
 
   <!-- Animation & Playback Controls -->
@@ -223,19 +228,42 @@
 <script id="vertex-shader" type="x-shader/x-vertex">
 attribute vec3 aPosition;
 attribute vec4 aColor;
+attribute vec3 aNormal;
+
 uniform mat4 uModelView;
 uniform mat4 uProjection;
+uniform bool uUseLighting;
+
 varying vec4 vColor;
+
 void main() {
   gl_Position = uProjection * uModelView * vec4(aPosition, 1.0);
-  vColor = aColor;
+  
+  if (uUseLighting) {
+    // Transform normal into view space (using upper 3x3 of ModelView)
+    vec3 normal = normalize(mat3(uModelView) * aNormal);
+    
+    // Directional light source pointing toward the scene from upper-right-front
+    vec3 lightDir = normalize(vec3(0.5, 0.8, 1.0));
+    
+    // Ambient light baseline + Lambertian diffuse component
+    float ambient = 0.35;
+    float diffuse = max(dot(normal, lightDir), 0.0) * 0.75;
+    float lightIntensity = min(ambient + diffuse, 1.0);
+    
+    vColor = vec4(aColor.rgb * lightIntensity, aColor.a);
+  } else {
+    vColor = aColor;
+  }
 }
 </script>
 
 <script id="fragment-shader" type="x-shader/x-fragment">
 precision mediump float;
 varying vec4 vColor;
-void main() { gl_FragColor = vColor; }
+void main() { 
+  gl_FragColor = vColor; 
+}
 </script>
 
 <script>
@@ -261,7 +289,8 @@ const params = {
   letterColors: ["#e63946", "#f4a261", "#2a9d8f", "#457b9d", "#9b5de5", "#f15bb5"],
   singleColor: "#e63946",
   bgColor: "#111111",
-  isAnimating: false
+  isAnimating: false,
+  useLighting: true
 };
 
 /* Column-major matrix helpers used by WebGL. */
@@ -376,12 +405,14 @@ const FACE_SHADE = { front: 1.0, right: 0.8, left: 0.7, top: 1.15, back: 0.55, b
 // Vertex positions and colours uploaded to the GPU.
 let points = [];
 let colors = [];
+let normals = []; // Store normal per vertex
 
-// Add two triangles for a quad whose vertices are ordered counter-clockwise.
-function pushQuad(a, b, c, d, rgb) {
+// Add two triangles for a quad with normal vectors
+function pushQuad(a, b, c, d, rgb, norm) {
   for (const v of [a, b, c, a, c, d]) {
     points.push(v[0], v[1], v[2]);
     colors.push(rgb[0], rgb[1], rgb[2], 1.0);
+    normals.push(norm[0], norm[1], norm[2]);
   }
 }
 
@@ -405,12 +436,13 @@ function createBox(x, y, z, w, h, d, baseRgb) {
     [x + w, y + h, z],      // 6 back  top-right
     [x,     y + h, z]       // 7 back  top-left
   ];
-  pushQuad(v[0], v[1], v[2], v[3], shade(baseRgb, FACE_SHADE.front));
-  pushQuad(v[1], v[5], v[6], v[2], shade(baseRgb, FACE_SHADE.right));
-  pushQuad(v[5], v[4], v[7], v[6], shade(baseRgb, FACE_SHADE.back));
-  pushQuad(v[4], v[0], v[3], v[7], shade(baseRgb, FACE_SHADE.left));
-  pushQuad(v[3], v[2], v[6], v[7], shade(baseRgb, FACE_SHADE.top));
-  pushQuad(v[4], v[5], v[1], v[0], shade(baseRgb, FACE_SHADE.bottom));
+  // Supply baseRgb and the outward normal vector for each face
+  pushQuad(v[0], v[1], v[2], v[3], baseRgb, [0, 0, 1]);   // Front
+  pushQuad(v[1], v[5], v[6], v[2], baseRgb, [1, 0, 0]);   // Right
+  pushQuad(v[5], v[4], v[7], v[6], baseRgb, [0, 0, -1]);  // Back
+  pushQuad(v[4], v[0], v[3], v[7], baseRgb, [-1, 0, 0]);  // Left
+  pushQuad(v[3], v[2], v[6], v[7], baseRgb, [0, 1, 0]);   // Top
+  pushQuad(v[4], v[5], v[1], v[0], baseRgb, [0, -1, 0]);  // Bottom
 }
 
 // Build one letter by merging horizontal runs of '#' in each bitmap row into single boxes.
@@ -455,7 +487,7 @@ function letterColor(i) {
  * about the origin pivot around the middle of the logo.
  */
 function buildWord() {
-  points = []; colors = [];
+  points = []; colors = []; normals = [];
   const word = params.word.toUpperCase();
   const n = word.length;
   const totalW = Array.from(word).reduce((width, ch) => width + getGlyphWidth(ch), 0)
@@ -480,8 +512,8 @@ function getWordHeight() { return GLYPH_H; }
 
 /* WebGL setup and geometry buffers. */
 
-let gl, program, vBuffer, cBuffer;
-let uModelView, uProjection, aPosition, aColor;
+let gl, program, vBuffer, cBuffer, nBuffer;
+let uModelView, uProjection, uUseLighting, aPosition, aColor, aNormal;
 let vertexCount = 0;
 
 function compileShader(type, source) {
@@ -508,11 +540,15 @@ function initWebGL() {
 
   aPosition = gl.getAttribLocation(program, "aPosition");
   aColor = gl.getAttribLocation(program, "aColor");
+  aNormal = gl.getAttribLocation(program, "aNormal"); // Locate normal attribute
+
   uModelView = gl.getUniformLocation(program, "uModelView");
   uProjection = gl.getUniformLocation(program, "uProjection");
+  uUseLighting = gl.getUniformLocation(program, "uUseLighting"); // Locate lighting uniform
 
   vBuffer = gl.createBuffer();
   cBuffer = gl.createBuffer();
+  nBuffer = gl.createBuffer(); // Create normal buffer
 
   gl.enable(gl.DEPTH_TEST);
   gl.enable(gl.CULL_FACE);   // Skip faces pointing away from the camera.
@@ -523,10 +559,15 @@ function initWebGL() {
 function rebuildGeometry() {
   buildWord();
   vertexCount = points.length / 3;
+
   gl.bindBuffer(gl.ARRAY_BUFFER, vBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(points), gl.STATIC_DRAW);
+
   gl.bindBuffer(gl.ARRAY_BUFFER, cBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, nBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normals), gl.STATIC_DRAW);
 }
 
 // Keep the canvas pixel dimensions in sync with its displayed size.
@@ -560,6 +601,7 @@ function drawLogo() {
   const aspect = gl.canvas.width / gl.canvas.height;
   gl.uniformMatrix4fv(uProjection, false, mat4Perspective(45, aspect, 0.1, 100));
   gl.uniformMatrix4fv(uModelView, false, buildModelView());
+  gl.uniform1i(uUseLighting, params.useLighting ? 1 : 0);
 
   gl.bindBuffer(gl.ARRAY_BUFFER, vBuffer);
   gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
@@ -567,6 +609,9 @@ function drawLogo() {
   gl.bindBuffer(gl.ARRAY_BUFFER, cBuffer);
   gl.vertexAttribPointer(aColor, 4, gl.FLOAT, false, 0, 0);
   gl.enableVertexAttribArray(aColor);
+  gl.bindBuffer(gl.ARRAY_BUFFER, nBuffer);
+  gl.vertexAttribPointer(aNormal, 3, gl.FLOAT, false, 0, 0);
+  gl.enableVertexAttribArray(aNormal);
 
   gl.drawArrays(gl.TRIANGLES, 0, vertexCount);
 }
@@ -874,6 +919,7 @@ function resetDefaults() {
   params.letterColors = ["#e63946", "#f4a261", "#2a9d8f", "#457b9d", "#9b5de5", "#f15bb5"];
   params.singleColor = "#e63946";
   params.bgColor = "#111111";
+  params.useLighting = true;
 
   // 3. Update DOM inputs
   const $ = id => document.getElementById(id);
@@ -889,6 +935,7 @@ function resetDefaults() {
   if ($("pickerBgColor")) $("pickerBgColor").value = "#111111";
   if ($("singleColorRow")) $("singleColorRow").style.display = "none";
   if ($("paletteColorRow")) $("paletteColorRow").style.display = "block";
+  if ($("checkLighting")) $("checkLighting").checked = true;
 
   // 4. Re-render UI color palette pickers and rebuild WebGL geometry
   renderPalettePickers();
@@ -915,7 +962,15 @@ function initExtensions() {
     });
   }
 
-  // 3. Attach keyboard shortcuts
+  // 3. Hook lighting checkbox toggle
+  const checkLighting = document.getElementById("checkLighting");
+  if (checkLighting) {
+    checkLighting.addEventListener("change", e => {
+      params.useLighting = e.target.checked;
+    });
+  }
+
+  // 4. Attach keyboard shortcuts
   window.addEventListener("keydown", e => {
     // Do not trigger shortcuts while typing in a text field
     if (e.target && e.target.tagName === "INPUT" && e.target.type === "text") return;
@@ -940,6 +995,11 @@ function initExtensions() {
     } else if (e.key === "d" || e.key === "D") {
       // 'D' resets all settings back to default
       resetDefaults();
+    } else if (e.key === "l" || e.key === "L") {
+      // 'L' toggles lighting on/off (From Step 6)
+      params.useLighting = !params.useLighting;
+      const chk = document.getElementById("checkLighting");
+      if (chk) chk.checked = params.useLighting;
     }
   });
 }
