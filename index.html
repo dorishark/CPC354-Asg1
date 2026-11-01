@@ -797,46 +797,49 @@ function updateAnimation(timestamp) {
   if (anim.phase === 6) {
     anim.t += dt * params.speed;
 
-    // Center the logo strictly at (0, 0, 0)
-    state.translate[0] = 0;
-    state.translate[1] = 0;
-    state.translate[2] = 0;
-
-    const baseScale = getMaxScaleToFit();
+    const aspect = gl.canvas.width / gl.canvas.height;
+    const visibleHeight = 2 * Math.abs(CAMERA_Z) * Math.tan(45 * Math.PI / 360);
+    const visibleWidth = visibleHeight * aspect;
 
     if (params.animPath === "bounce") {
-      // Path 2: In-place Center Vertical Bounce & Squash/Stretch
-      state.scale = baseScale * 0.85;
+      // Path 2: In-place Center Bounce (Oscillates strictly in the center)
+      state.scale = getMaxScaleToFit() * 0.85; // Leave headroom so bounce never clips edges
+      state.translate[0] = 0;
+      state.translate[2] = 0;
 
-      // Vertical bounce centered in place (oscillates smoothly up and down)
-      const bounceHeight = 0.35; // World units, strictly inside screen
-      state.translate[1] = Math.abs(Math.sin(anim.t * 3.5)) * bounceHeight;
+      // Parabolic vertical bounce centered at X = 0
+      const bounceHeight = (visibleHeight * 0.35) - (getWordHeight() * state.scale / 2);
+      state.translate[1] = (Math.abs(Math.sin(anim.t * 3.5)) * 2 - 1) * Math.max(0, bounceHeight * 0.5);
 
-      // Dynamic tilt and nod while bouncing at the center
-      state.theta[0] = Math.sin(anim.t * 3.5) * 12;
+      // Subtle dynamic tilt while bouncing
+      state.theta[0] = Math.sin(anim.t * 3.5) * 10;
       state.theta[1] = 0;
-      state.theta[2] = Math.sin(anim.t * 1.75) * 6;
+      state.theta[2] = -Math.cos(anim.t * 1.75) * 6;
 
     } else if (params.animPath === "flip") {
-      // Path 3: In-place Center 3D Continuous Flip / Tumble
-      // Scale slightly down so 3D extrusion depth stays within window when tumbling
-      state.scale = baseScale * 0.78;
+      // Path 3: In-place Center 3D Flip & Tumble
+      state.scale = getMaxScaleToFit() * 0.78; // Headroom for 3D extrusion depth
+      state.translate[0] = 0;
+      state.translate[1] = 0;
+      state.translate[2] = 0;
 
-      // Pure in-place 3D rotation centered on the origin
-      state.theta[0] = (anim.t * 100) % 360;  // Continuous full 360° flip on X
-      state.theta[1] = Math.sin(anim.t * 1.5) * 30; // 30° rhythmic yaw on Y
-      state.theta[2] = Math.cos(anim.t * 1.5) * 10; // 10° rhythmic roll on Z
+      // 3D continuous rotation centered at the origin
+      state.theta[0] = (anim.t * 100) % 360;  // 360° flip along X axis
+      state.theta[1] = Math.sin(anim.t * 1.5) * 25; // Subtle rhythmic yaw
+      state.theta[2] = 0;
 
     } else {
-      // Path 1 (Default): In-place Center Floating Wobble / Hover
-      state.scale = baseScale;
-
-      // Gentle floating hover centered at the origin
-      state.translate[0] = Math.cos(anim.t * 1.8) * 0.15;
-      state.translate[1] = Math.sin(anim.t * 1.8) * 0.15;
-      state.theta[0] = Math.sin(anim.t * 1.2) * 8;
-      state.theta[1] = Math.cos(anim.t * 1.5) * 12;
+      // Path 1 (Default): Original Oval sequence
+      state.scale = getMaxScaleToFit();
+      state.theta[0] = 0;
       state.theta[2] = 0;
+
+      const moveX = Math.max(0, visibleWidth * 0.47 - getWordWidth() * state.scale / 2);
+      const moveY = Math.max(0, visibleHeight * 0.47 - getWordHeight() * state.scale / 2);
+
+      const angle = anim.t * 2 * Math.PI / 6;
+      state.translate[0] = Math.cos(angle) * moveX;
+      state.translate[1] = Math.sin(angle) * moveY;
     }
 
     updatePhaseDisplay();
