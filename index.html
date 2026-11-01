@@ -239,6 +239,14 @@
   <div class="control-group">
     <div class="group-title">Animation Controls</div>
     <div class="control-row">
+      <label for="selectAnimPath">Movement Loop Path</label>
+      <select id="selectAnimPath">
+        <option value="oval">1: Smooth Oval (Default)</option>
+        <option value="bounce">2: Dynamic Bounce</option>
+        <option value="flip">3: 3D Flip & Wave</option>
+      </select>
+    </div>
+    <div class="control-row">
       <div class="label-val"><label for="sliderSpeed">Playback Speed</label><span id="valSpeed" class="val-badge">1.0x</span></div>
       <input id="sliderSpeed" type="range" min="0.2" max="3.0" step="0.1" value="1.0">
     </div>
@@ -265,6 +273,7 @@
       <div class="shortcut-item"><span>Random Colors</span><kbd>V</kbd></div>
       <div class="shortcut-item"><span>Random Background</span><kbd>B</kbd></div>
       <div class="shortcut-item"><span>Lighting</span><kbd>L</kbd></div>
+      <div class="shortcut-item"><span>Path: Oval / Bounce / Flip</span><kbd>1 / 2 / 3</kbd></div>
       <div class="shortcut-item"><span>Playback Speed</span><kbd>, / .</kbd></div>
     </div>
   </div>
@@ -335,7 +344,8 @@ const params = {
   singleColor: "#e63946",
   bgColor: "#111111",
   isAnimating: false,
-  useLighting: true
+  useLighting: true,
+  animPath: "oval"
 };
 
 /* Column-major matrix helpers used by WebGL. */
@@ -777,22 +787,37 @@ function updateAnimation(timestamp) {
   if (anim.phase === 6) {
     state.scale = getMaxScaleToFit();
     anim.t += dt * params.speed;
-    // Find the visible WebGL area, then set the oval's horizontal and vertical
-    // radii so the scaled logo stays inside the viewport as it moves.
+
     const aspect = gl.canvas.width / gl.canvas.height;
     const visibleHeight = 2 * Math.abs(CAMERA_Z) * Math.tan(45 * Math.PI / 360);
     const visibleWidth = visibleHeight * aspect;
     const moveX = Math.max(0, visibleWidth * 0.47 - getWordWidth() * state.scale / 2);
     const moveY = Math.max(0, visibleHeight * 0.47 - getWordHeight() * state.scale / 2);
 
-    // Convert elapsed time to an angle: one full oval takes six seconds,
-    // adjusted by the selected animation speed.
-    const angle = anim.t * 2 * Math.PI / 6;
-
-    // Cosine and sine trace an ellipse around the center; moveX/moveY are its
-    // radii, so different viewport proportions produce a matching oval shape.
-    state.translate[0] = Math.cos(angle) * moveX;
-    state.translate[1] = Math.sin(angle) * moveY;
+    if (params.animPath === "bounce") {
+      // Path 2: Harmonic bouncing with dynamic squashing/tilting
+      const bouncePeriod = 1.8;
+      const progress = (anim.t % bouncePeriod) / bouncePeriod;
+      // Parabolic vertical trajectory
+      state.translate[1] = (Math.abs(Math.sin(anim.t * 3.5)) * 2 - 1) * moveY;
+      state.translate[0] = Math.sin(anim.t * 1.2) * (moveX * 0.7);
+      state.theta[0] = Math.sin(anim.t * 3.5) * 12; // tilt on bounce
+      state.theta[2] = -Math.cos(anim.t * 1.2) * 8;
+    } else if (params.animPath === "flip") {
+      // Path 3: Continuous 3D flipping with figure-8 infinity loop
+      state.translate[0] = Math.sin(anim.t * 1.5) * moveX;
+      state.translate[1] = Math.sin(anim.t * 3.0) * (moveY * 0.5); // Figure-8 Lissajous
+      state.theta[0] = (anim.t * 120) % 360;  // Continuous X tumble/flip
+      state.theta[1] = Math.sin(anim.t) * 30; // Subtle Y rocking
+      state.theta[2] = 0;
+    } else {
+      // Path 1 (Default): Smooth horizontal/vertical oval orbit
+      const angle = anim.t * 2 * Math.PI / 6;
+      state.translate[0] = Math.cos(angle) * moveX;
+      state.translate[1] = Math.sin(angle) * moveY;
+      state.theta[0] = 0;
+      state.theta[2] = 0;
+    }
 
     updatePhaseDisplay();
   }
@@ -965,6 +990,7 @@ function resetDefaults() {
   params.singleColor = "#e63946";
   params.bgColor = "#111111";
   params.useLighting = true;
+  params.animPath = "oval";
 
   // 3. Update DOM inputs
   const $ = id => document.getElementById(id);
@@ -981,6 +1007,7 @@ function resetDefaults() {
   if ($("singleColorRow")) $("singleColorRow").style.display = "none";
   if ($("paletteColorRow")) $("paletteColorRow").style.display = "block";
   if ($("checkLighting")) $("checkLighting").checked = true;
+  if (document.getElementById("selectAnimPath")) document.getElementById("selectAnimPath").value = "oval";
 
   // 4. Re-render UI color palette pickers and rebuild WebGL geometry
   renderPalettePickers();
@@ -997,7 +1024,7 @@ function getRandomHexColor() {
   return color;
 }
 
-/* Extensions - Colour modes, lighting, shortcuts, and default reset */
+/* Extensions - Colour modes, lighting, shortcuts, animation paths, and default reset */
 function initExtensions() {
   const $ = id => document.getElementById(id);
 
@@ -1026,7 +1053,15 @@ function initExtensions() {
     });
   }
 
-  // 4. Attach keyboard shortcuts
+  // 4. Hook animation path dropdown selector
+  const selectAnimPath = $("selectAnimPath");
+  if (selectAnimPath) {
+    selectAnimPath.addEventListener("change", e => {
+      params.animPath = e.target.value;
+    });
+  }
+
+  // 5. Attach keyboard shortcuts
   window.addEventListener("keydown", e => {
     // Avoid triggering controls while typing into the text field
     if (e.target && e.target.tagName === "INPUT" && e.target.type === "text") return;
@@ -1059,6 +1094,21 @@ function initExtensions() {
     else if (e.key === "l" || e.key === "L") {
       params.useLighting = !params.useLighting;
       if ($("checkLighting")) $("checkLighting").checked = params.useLighting;
+    }
+    // --- Animation Path 1 (Default Oval): Key 1 ---
+    else if (e.key === "1") {
+      params.animPath = "oval";
+      if ($("selectAnimPath")) $("selectAnimPath").value = "oval";
+    }
+    // --- Animation Path 2 (Dynamic Bounce): Key 2 ---
+    else if (e.key === "2") {
+      params.animPath = "bounce";
+      if ($("selectAnimPath")) $("selectAnimPath").value = "bounce";
+    }
+    // --- Animation Path 3 (3D Flip & Wave): Key 3 ---
+    else if (e.key === "3") {
+      params.animPath = "flip";
+      if ($("selectAnimPath")) $("selectAnimPath").value = "flip";
     }
     // --- Extrusion Depth: [ / ] ---
     else if (e.key === "[" || e.key === "]") {
@@ -1112,7 +1162,7 @@ function initExtensions() {
     }
   });
 
-  // 5. Window resize handling
+  // 6. Window resize handling
   window.addEventListener("resize", () => {
     if (gl) resizeCanvas();
   });
