@@ -896,20 +896,39 @@ function resetDefaults() {
 }
 
 /* Reserved for optional colour, lighting, keyboard, and reset controls. */
+/* Extensions - Colour modes, shortcuts, and default reset */
 function initExtensions() {
-  /* Attach keyboard shortcuts for playback control */
+  // 1. Hook Reset Defaults button
+  const btnResetDefaults = document.getElementById("btnResetDefaults");
+  if (btnResetDefaults) {
+    btnResetDefaults.addEventListener("click", resetDefaults);
+  }
+
+  // 2. Hide/show palette row when Rainbow mode is chosen
+  const selectMode = document.getElementById("selectColorMode");
+  if (selectMode) {
+    selectMode.addEventListener("change", e => {
+      const palRow = document.getElementById("paletteColorRow");
+      if (palRow) {
+        palRow.style.display = (e.target.value === "perLetter") ? "block" : "none";
+      }
+    });
+  }
+
+  // 3. Attach keyboard shortcuts
   window.addEventListener("keydown", e => {
-    // Never intercept keys when the user is actively typing in the text field
+    // Do not trigger shortcuts while typing in a text field
     if (e.target && e.target.tagName === "INPUT" && e.target.type === "text") return;
 
     if (e.code === "Space") {
-      e.preventDefault(); // Prevents page scrolling down
+      e.preventDefault();
       anim.running = !anim.running;
       if (anim.running) _lastTimestamp = null;
       setControlsLocked(anim.running);
       setStatusBadge(anim.running ? "running" : "paused", anim.running ? "RUNNING" : "PAUSED");
       updatePhaseDisplay();
     } else if (e.key === "r" || e.key === "R") {
+      // 'R' resets the animation sequence
       anim.phase = 0;
       anim.t = 0;
       anim.running = false;
@@ -918,6 +937,9 @@ function initExtensions() {
       setControlsLocked(false);
       setStatusBadge("ready", "READY");
       updatePhaseDisplay();
+    } else if (e.key === "d" || e.key === "D") {
+      // 'D' resets all settings back to default
+      resetDefaults();
     }
   });
 }
