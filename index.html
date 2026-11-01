@@ -431,9 +431,22 @@ function buildLetter(ch, x0, y0, z0, depth, rgb) {
   }
 }
 
+// Helper to convert HSV to RGB (0..1) for smooth rainbow spectrum
+function hsvToRgb(h, s, v) {
+  let f = (n, k = (n + h / 60) % 6) => v - v * s * Math.max(Math.min(k, 4 - k, 1), 0);
+  return [f(5), f(3), f(1)];
+}
+
 // Select the colour assigned to a letter.
 function letterColor(i) {
-  if (params.colorMode === "single") return hexToRgb(params.singleColor);
+  if (params.colorMode === "single") {
+    return hexToRgb(params.singleColor);
+  }
+  if (params.colorMode === "rainbow") {
+    const totalLetters = Math.max(params.word.length, 1);
+    const hue = (i / totalLetters) * 360; // Spread hues evenly across letters
+    return hsvToRgb(hue, 0.85, 0.95);
+  }
   return hexToRgb(params.letterColors[i % params.letterColors.length]);
 }
 
