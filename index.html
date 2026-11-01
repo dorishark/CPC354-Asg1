@@ -112,6 +112,24 @@
   .btn-primary:hover { background: #2ea043; }
   .btn-secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d !important; }
   .btn-secondary:hover { background: #30363d; }
+  .btn-reset-all {
+    width: 100%;
+    margin-top: 8px;
+    padding: 7px 0;
+    border-radius: 6px;
+    border: 1px dashed #484f58;
+    background: rgba(33, 38, 45, 0.7);
+    color: #8b949e;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .btn-reset-all:hover {
+    background: #30363d;
+    color: #f0f2f5;
+    border-color: #8b949e;
+  }
 
   #phaseDisplay {
     margin-top: 8px;
@@ -181,13 +199,13 @@
   <div class="control-group">
     <div class="group-title">Typography & Layout</div>
     <div class="control-row">
-      <label for="inputWord">Word (Max 6)</label>
+      <label for="inputWord">Word / Number(Max 6)</label>
       <input id="inputWord" type="text" value="meow" maxlength="6" spellcheck="false" autocomplete="off">
-      <div class="input-hint">Lowercase inputs automatically convert to 3D block capitals.</div>
+      <div class="input-hint">Supports letters (A–Z) & numbers (0–9). Auto-capitalizes.</div>
     </div>
     <div class="control-row">
       <div class="label-val"><label for="sliderSpacing">Letter Spacing</label><span id="valSpacing" class="val-badge">0.15</span></div>
-      <input id="sliderSpacing" type="range" min="0.0" max="0.5" step="0.02" value="0.15">
+      <input id="sliderSpacing" type="range" min="0.0" max="0.30" step="0.01" value="0.15">
     </div>
   </div>
 
@@ -255,8 +273,7 @@
       <button id="btnStop" class="btn-secondary">Pause</button>
       <button id="btnReset" class="btn-secondary">Reset</button>
     </div>
-      <button id="btnResetDefaults" class="btn-secondary" style="width: 100%; margin-top: 4px;">Reset Defaults</button>
-
+      <button id="btnResetDefaults" class="btn-reset-all">↺ Restore All Settings</button>
     <div id="phaseDisplay">Phase 0: Waiting</div>
   </div>
 
@@ -620,10 +637,16 @@ function initWebGL() {
   return true;
 }
 
-// Rebuild the mesh and upload the updated buffers.
+// Rebuild the mesh and upload the updated buffers
 function rebuildGeometry() {
   buildWord();
   vertexCount = points.length / 3;
+
+  // Dynamically update scale when tweaking spacing/depth or typing while paused
+  if (!anim.running) {
+    if (anim.phase === 0) state.scale = getBaseScale();
+    else if (anim.phase >= 5) state.scale = getMaxScaleToFit();
+  }
 
   gl.bindBuffer(gl.ARRAY_BUFFER, vBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(points), gl.STATIC_DRAW);
@@ -648,9 +671,19 @@ function resizeCanvas() {
 
 const CAMERA_Z = -5;   // Place the logo in front of the camera.
 
-// Apply scale, rotation, and translation to the model in that order.
+// Calculate horizontal offset so the 3D stage centers in the open area left of the UI panel
+function getStageOffsetX() {
+  const aspect = gl.canvas.width / gl.canvas.height;
+  const visW = 2 * Math.abs(CAMERA_Z) * Math.tan(45 * Math.PI / 360) * aspect;
+  // Reserve 360px on the right for panel + drop shadow + comfort margin
+  const panelFraction = Math.min(0.42, 360 / Math.max(gl.canvas.width, 600));
+  return -(visW * panelFraction * 0.5);
+}
+
+// Apply scale, rotation, and translation to the model in that order
 function buildModelView() {
-  let m = mat4Translate(state.translate[0], state.translate[1], state.translate[2] + CAMERA_Z);
+  const stageX = getStageOffsetX();
+  let m = mat4Translate(state.translate[0] + stageX, state.translate[1], state.translate[2] + CAMERA_Z);
   m = mat4Mul(m, mat4RotateX(state.theta[0]));
   m = mat4Mul(m, mat4RotateY(state.theta[1]));
   m = mat4Mul(m, mat4RotateZ(state.theta[2]));
@@ -724,13 +757,43 @@ function easeInOut(t) {
   return t * t * (3 - 2 * t);
 }
 
-// Leave space around the enlarged logo for its movement loop.
+// Helper: Accounts for perspective magnification when extrusion depth pushes front vertices closer
+function getDepthExpansionFactor() {
+  const zFront = Math.abs(CAMERA_Z) - (params.depth * 0.5);
+  return Math.abs(CAMERA_Z) / Math.max(zFront, 0.1);
+}
+
+// Calculate base scale so any word (2 to 6 letters) has generous margins at start
+function getBaseScale() {
+  const aspect = gl.canvas.width / gl.canvas.height;
+  const visH = 2 * Math.abs(CAMERA_Z) * Math.tan(45 * Math.PI / 360);
+  const visW = visH * aspect;
+  const panelFraction = Math.min(0.42, 360 / Math.max(gl.canvas.width, 600));
+  const availableWidth = visW * (1.0 - panelFraction);
+
+  const effW = getWordWidth() * getDepthExpansionFactor();
+  const effH = getWordHeight() * getDepthExpansionFactor();
+
+  // Occupy at most 46% of available width and 35% of height at start
+  const sx = (availableWidth * 0.46) / effW;
+  const sy = (visH * 0.35) / effH;
+  return Math.min(1.0, sx, sy);
+}
+
+// Calculate full-screen scale so the enlarged logo fits comfortably without clipping
 function getMaxScaleToFit() {
   const aspect = gl.canvas.width / gl.canvas.height;
   const visH = 2 * Math.abs(CAMERA_Z) * Math.tan(45 * Math.PI / 360);
   const visW = visH * aspect;
-  const sx = (visW * 0.72) / getWordWidth();
-  const sy = (visH * 0.72) / getWordHeight();
+  const panelFraction = Math.min(0.42, 360 / Math.max(gl.canvas.width, 600));
+  const availableWidth = visW * (1.0 - panelFraction);
+
+  const effW = getWordWidth() * getDepthExpansionFactor();
+  const effH = getWordHeight() * getDepthExpansionFactor();
+
+  // Enlarge to at most 60% of available width and 50% of height
+  const sx = (availableWidth * 0.60) / effW;
+  const sy = (visH * 0.50) / effH;
   return Math.min(sx, sy);
 }
 
@@ -739,7 +802,7 @@ function resetAnimationState() {
   state.theta[0] = 0;
   state.theta[1] = 0;
   state.theta[2] = 0;
-  state.scale = 1;
+  state.scale = getBaseScale();
   state.translate[0] = 0;
   state.translate[1] = 0;
   state.translate[2] = 0;
@@ -764,6 +827,8 @@ function updateAnimation(timestamp) {
   if (anim.phase >= 1 && anim.phase <= 5) {
     anim.t += dt * params.speed / PHASE_BASE_SECS;
     const et = easeInOut(Math.min(anim.t, 1));
+    const s0 = getBaseScale();
+    const sMax = getMaxScaleToFit();
 
     // Rotate right and back, left and back, then scale up.
     switch (anim.phase) {
@@ -773,8 +838,8 @@ function updateAnimation(timestamp) {
       // Repeat the turn in the opposite direction, then return to zero.
       case 3: state.theta[1] = -et * 180; break;
       case 4: state.theta[1] = -(1 - et) * 180; break;
-      // Grow uniformly from the starting size to the viewport-fit size.
-      case 5: state.scale = 1 + et * (getMaxScaleToFit() - 1); break;
+      // Smoothly enlarge from base scale (s0) to full-screen scale (sMax)
+      case 5: state.scale = s0 + et * (sMax - s0); break;
     }
 
     if (anim.t >= 1) {
@@ -784,7 +849,7 @@ function updateAnimation(timestamp) {
         case 2: state.theta[1] = 0; break;
         case 3: state.theta[1] = -180; break;
         case 4: state.theta[1] = 0; break;
-        case 5: state.scale = getMaxScaleToFit(); break;
+        case 5: state.scale = sMax; break;
       }
       anim.t = 0;
       anim.phase++;
@@ -798,18 +863,24 @@ function updateAnimation(timestamp) {
     anim.t += dt * params.speed;
 
     const aspect = gl.canvas.width / gl.canvas.height;
-    const visibleHeight = 2 * Math.abs(CAMERA_Z) * Math.tan(45 * Math.PI / 360);
-    const visibleWidth = visibleHeight * aspect;
+    const visH = 2 * Math.abs(CAMERA_Z) * Math.tan(45 * Math.PI / 360);
+    const visW = visH * aspect;
+    const panelFraction = Math.min(0.42, 360 / Math.max(gl.canvas.width, 600));
+    const availableWidth = visW * (1.0 - panelFraction);
+    const sMax = getMaxScaleToFit();
+
+    const effW = getWordWidth() * getDepthExpansionFactor() * state.scale;
+    const effH = getWordHeight() * getDepthExpansionFactor() * state.scale;
 
     if (params.animPath === "bounce") {
-      // Path 2: In-place Center Bounce (Oscillates strictly in the center)
-      state.scale = getMaxScaleToFit() * 0.85; // Leave headroom so bounce never clips edges
+    // Path 2: In-place Center Bounce (Oscillates strictly in the centre)
+      state.scale = sMax * 0.85;
       state.translate[0] = 0;
       state.translate[2] = 0;
 
-      // Parabolic vertical bounce centered at X = 0
-      const bounceHeight = (visibleHeight * 0.35) - (getWordHeight() * state.scale / 2);
-      state.translate[1] = (Math.abs(Math.sin(anim.t * 3.5)) * 2 - 1) * Math.max(0, bounceHeight * 0.5);
+      // Parabolic vertical bounce centered at X=0
+      const bounceHeight = Math.max(0, (visH - effH) * 0.32);
+      state.translate[1] = (Math.abs(Math.sin(anim.t * 3.5)) * 2 - 1) * bounceHeight;
 
       // Subtle dynamic tilt while bouncing
       state.theta[0] = Math.sin(anim.t * 3.5) * 10;
@@ -818,24 +889,24 @@ function updateAnimation(timestamp) {
 
     } else if (params.animPath === "flip") {
       // Path 3: In-place Center 3D Flip & Tumble
-      state.scale = getMaxScaleToFit() * 0.78; // Headroom for 3D extrusion depth
+      state.scale = sMax * 0.78; // Headroom for 3D extrusion depth
       state.translate[0] = 0;
       state.translate[1] = 0;
       state.translate[2] = 0;
 
       // 3D continuous rotation centered at the origin
-      state.theta[0] = (anim.t * 100) % 360;  // 360° flip along X axis
+      state.theta[0] = (anim.t * 100) % 360; // 360° flip along X axis
       state.theta[1] = Math.sin(anim.t * 1.5) * 25; // Subtle rhythmic yaw
       state.theta[2] = 0;
 
     } else {
       // Path 1 (Default): Original Oval sequence
-      state.scale = getMaxScaleToFit();
+      state.scale = sMax;
       state.theta[0] = 0;
       state.theta[2] = 0;
 
-      const moveX = Math.max(0, visibleWidth * 0.47 - getWordWidth() * state.scale / 2);
-      const moveY = Math.max(0, visibleHeight * 0.47 - getWordHeight() * state.scale / 2);
+      const moveX = Math.max(0, (availableWidth - effW) * 0.32);
+      const moveY = Math.max(0, (visH - effH) * 0.30);
 
       const angle = anim.t * 2 * Math.PI / 6;
       state.translate[0] = Math.cos(angle) * moveX;
@@ -844,12 +915,19 @@ function updateAnimation(timestamp) {
 
     updatePhaseDisplay();
   }
-}
+}  
 
-// Show the current phase in the control panel.
+// Show the current phase dynamically in the control panel
 function updatePhaseDisplay() {
   const el = document.getElementById("phaseDisplay");
-  if (el) {
+  if (!el) return;
+
+  if (anim.phase === 6) {
+    let pathName = "Move in Oval (loop)";
+    if (params.animPath === "bounce") pathName = "Bounce (loop)";
+    else if (params.animPath === "flip") pathName = "Flip & Wave (loop)";
+    el.textContent = "Phase 6: " + pathName;
+  } else {
     const name = PHASE_NAMES[anim.phase] || "Unknown";
     el.textContent = "Phase " + anim.phase + ": " + name;
   }
@@ -1084,6 +1162,7 @@ function initExtensions() {
       state.theta[0] = 0;
       state.theta[1] = 0;
       state.theta[2] = 0;
+      updatePhaseDisplay();
     });
   }
 
@@ -1128,6 +1207,7 @@ function initExtensions() {
       state.theta[1] = 0;
       state.theta[2] = 0;
       if ($("selectAnimPath")) $("selectAnimPath").value = "oval";
+      updatePhaseDisplay();
     }
     // --- Animation Path 2 (Center Bounce): Key 2 ---
     else if (e.key === "2") {
@@ -1136,6 +1216,7 @@ function initExtensions() {
       state.theta[1] = 0;
       state.theta[2] = 0;
       if ($("selectAnimPath")) $("selectAnimPath").value = "bounce";
+      updatePhaseDisplay();
     }
     // --- Animation Path 3 (Center 3D Flip): Key 3 ---
     else if (e.key === "3") {
@@ -1144,6 +1225,7 @@ function initExtensions() {
       state.theta[1] = 0;
       state.theta[2] = 0;
       if ($("selectAnimPath")) $("selectAnimPath").value = "flip";
+      updatePhaseDisplay();
     }
     // --- Extrusion Depth: [ / ] ---
     else if (e.key === "[" || e.key === "]") {
@@ -1156,7 +1238,7 @@ function initExtensions() {
     // --- Letter Spacing: - / = ---
     else if (e.key === "-" || e.key === "=" || e.key === "+") {
       const delta = (e.key === "-" ? -0.02 : 0.02);
-      params.spacing = Math.min(0.5, Math.max(0.0, +(params.spacing + delta).toFixed(2)));
+      params.spacing = Math.min(0.30, Math.max(0.0, +(params.spacing + delta).toFixed(2)));
       if ($("sliderSpacing")) $("sliderSpacing").value = params.spacing;
       if ($("valSpacing")) $("valSpacing").textContent = params.spacing.toFixed(2);
       rebuildGeometry();
