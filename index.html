@@ -441,7 +441,17 @@ const GLYPHS = {
   W: ["#...#", "#...#", "#.#.#", "##.##", ".#.#."],
   X: ["#.#", "#.#", ".#.", "#.#", "#.#"],
   Y: ["#.#", "#.#", ".#.", ".#.", ".#."],
-  Z: ["###", "..#", ".#.", "#..", "###"]
+  Z: ["###", "..#", ".#.", "#..", "###"],
+  "0": ["###", "#.#", "#.#", "#.#", "###"],
+  "1": [".#.", "##.", ".#.", ".#.", "###"],
+  "2": ["###", "..#", "###", "#..", "###"],
+  "3": ["###", "..#", "###", "..#", "###"],
+  "4": ["#.#", "#.#", "###", "..#", "..#"],
+  "5": ["###", "#..", "###", "..#", "###"],
+  "6": ["###", "#..", "###", "#.#", "###"],
+  "7": ["###", "..#", ".#.", ".#.", ".#."],
+  "8": ["###", "#.#", "###", "#.#", "###"],
+  "9": ["###", "#.#", "###", "..#", "###"]
 };
 
 const CELL = 0.2;                 // edge length of one bitmap cell (world units)
@@ -860,7 +870,7 @@ function initUI() {
 
   // 1. Text input listener (filters valid letters only)
   $("inputWord").addEventListener("input", e => {
-    const sanitized = e.target.value.toUpperCase().replace(/[^A-Z]/g, "");
+    const sanitized = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
     if (sanitized.length > 0) {
       params.word = sanitized;
       renderPalettePickers(); // Rebuilds dynamic swatches to match letter count
