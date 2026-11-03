@@ -14,11 +14,17 @@
   }
   #glcanvas { display: block; width: 100vw; height: 100vh; }
 
-  /* Studio Floating UI Panel */
-  #uiPanel {
+  #controlPanels {
     position: fixed;
     top: 16px;
     right: 16px;
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    max-height: calc(100vh - 32px);
+    z-index: 100;
+  }
+  .studio-panel {
     width: 280px;
     background: rgba(18, 22, 34, 0.90);
     backdrop-filter: blur(12px);
@@ -31,8 +37,8 @@
     max-height: calc(100vh - 32px);
     overflow-y: auto;
     box-sizing: border-box;
-    z-index: 100;
   }
+  #animationPanel { width: 260px; }
 
   .panel-header {
     display: flex;
@@ -54,6 +60,7 @@
   .status-badge.ready { background: #2a9d8f; color: #fff; }
   .status-badge.running { background: #e76f51; color: #fff; }
   .status-badge.paused { background: #e9c46a; color: #222; }
+  .status-badge.playground { background: #6554c0; color: #fff; }
 
   .control-group { margin-bottom: 14px; }
   .group-title { font-size: 10px; text-transform: uppercase; font-weight: 700; color: #8a99ad; margin-bottom: 8px; letter-spacing: 0.8px; }
@@ -112,6 +119,10 @@
   .btn-primary:hover { background: #2ea043; }
   .btn-secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d !important; }
   .btn-secondary:hover { background: #30363d; }
+  .button-bar button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
   .btn-reset-all {
     width: 100%;
     margin-top: 8px;
@@ -170,6 +181,26 @@
     color: #8b949e;
     font-size: 11px;
   }
+  .playground-help {
+    padding: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.18);
+  }
+  .playground-help .group-title { margin-bottom: 8px; }
+  @media (max-width: 760px) {
+    #controlPanels {
+      left: 12px;
+      right: 12px;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .studio-panel, #animationPanel {
+      width: 100%;
+      max-height: calc((100vh - 40px) / 2);
+      padding: 12px;
+    }
+  }
   kbd {
     display: inline-block;
     padding: 2px 5px;
@@ -188,11 +219,11 @@
 <body>
 <canvas id="glcanvas"></canvas>
 
+<div id="controlPanels">
 <!-- User Interface & Control Panel -->
-<div id="uiPanel">
+<div id="uiPanel" class="studio-panel">
   <div class="panel-header">
-    <h2>TV Ident Studio</h2>
-    <span id="badgeStatus" class="status-badge ready">READY</span>
+    <h2>UI Panel</h2>
   </div>
 
   <!-- Text & Typography Settings -->
@@ -253,15 +284,36 @@
     </div>
   </div>
 
+    <div class="control-group" style="margin-bottom: 0;">
+      <div class="group-title">UI Shortcuts</div>
+      <div class="shortcuts-list">
+        <div class="shortcut-item"><span>Restore Settings (outside Playground)</span><kbd>D</kbd></div>
+        <div class="shortcut-item"><span>Letter Spacing (outside Playground)</span><kbd>- / =</kbd></div>
+        <div class="shortcut-item"><span>Extrusion Depth</span><kbd>[ / ]</kbd></div>
+        <div class="shortcut-item"><span>Cycle Color Mode</span><kbd>C</kbd></div>
+        <div class="shortcut-item"><span>Random Colors / Background</span><kbd>V / B</kbd></div>
+        <div class="shortcut-item"><span>Toggle Lighting</span><kbd>L</kbd></div>
+        <div class="shortcut-item"><span>Playback Speed</span><kbd>, / .</kbd></div>
+      </div>
+    </div>
+    <button id="btnResetDefaults" class="btn-reset-all">Restore All Settings</button>
+    </div>
+
   <!-- Animation & Playback Controls -->
-  <div class="control-group">
-    <div class="group-title">Animation Controls</div>
+  <div id="animationPanel" class="studio-panel">
+    <div class="panel-header">
+      <h2>Animation Panel</h2>
+      <span id="badgeStatus" class="status-badge ready">READY</span>
+    </div>
+    <div class="control-group">
+    <div class="group-title">Playback</div>
     <div class="control-row">
-      <label for="selectAnimPath">Animation Path</label>
+      <label for="selectAnimPath">Animation Sequence</label>
       <select id="selectAnimPath">
         <option value="oval">1: Default</option>
         <option value="bounce">2: Bounce</option>
         <option value="flip">3: Flip & Wave</option>
+        <option value="playground">Playground</option>
       </select>
     </div>
     <div class="control-row">
@@ -273,27 +325,29 @@
       <button id="btnStop" class="btn-secondary">Pause</button>
       <button id="btnReset" class="btn-secondary">Reset</button>
     </div>
-      <button id="btnResetDefaults" class="btn-reset-all">↺ Restore All Settings</button>
     <div id="phaseDisplay">Phase 0: Waiting</div>
-  </div>
+    </div>
 
   <!-- Comprehensive Keyboard Shortcuts Guide -->
   <div class="control-group" style="margin-bottom: 0;">
-    <div class="group-title">Keyboard Controls</div>
+    <div class="group-title">Animation Shortcuts</div>
     <div class="shortcuts-list">
-      <div class="shortcut-item"><span>Start / Pause</span><kbd>Space</kbd></div>
-      <div class="shortcut-item"><span>Reset Animation</span><kbd>R</kbd></div>
-      <div class="shortcut-item"><span>Restore All Settings</span><kbd>D</kbd></div>
-      <div class="shortcut-item"><span>Letter Spacing</span><kbd>- / =</kbd></div>
-      <div class="shortcut-item"><span>Extrusion Depth</span><kbd>[ / ]</kbd></div>
-      <div class="shortcut-item"><span>Cycle Color Mode</span><kbd>C</kbd></div>
-      <div class="shortcut-item"><span>Random Colors</span><kbd>V</kbd></div>
-      <div class="shortcut-item"><span>Random Background</span><kbd>B</kbd></div>
-      <div class="shortcut-item"><span>Lighting</span><kbd>L</kbd></div>
-      <div class="shortcut-item"><span>Path: Default / Bounce / Flip</span><kbd>1 / 2 / 3</kbd></div>
-      <div class="shortcut-item"><span>Playback Speed</span><kbd>, / .</kbd></div>
+      <div class="shortcut-item"><span>Start / Pause (not Playground)</span><kbd>Space</kbd></div>
+      <div class="shortcut-item"><span>Reset Animation / View</span><kbd>R</kbd></div>
+      <div class="shortcut-item"><span>Choose sequence</span><kbd>1 / 2 / 3</kbd></div>
     </div>
   </div>
+
+  <div id="playgroundControls" class="control-group playground-help" style="display: none;">
+    <div class="group-title">Playground Controls</div>
+    <div class="shortcuts-list">
+      <div class="shortcut-item"><span>Rotate up / down</span><kbd>↑ / ↓</kbd></div>
+      <div class="shortcut-item"><span>Rotate left / right</span><kbd>← / →</kbd></div>
+      <div class="shortcut-item"><span>Zoom in / out</span><kbd>+ / -</kbd></div>
+      <div class="shortcut-item"><span>Move object</span><kbd>W / A / S / D</kbd></div>
+    </div>
+  </div>
+</div>
 </div>
 
 <script id="vertex-shader" type="x-shader/x-vertex">
@@ -643,7 +697,7 @@ function rebuildGeometry() {
   vertexCount = points.length / 3;
 
   // Dynamically update scale when tweaking spacing/depth or typing while paused
-  if (!anim.running) {
+  if (!anim.running && params.animPath !== "playground") {
     if (anim.phase === 0) state.scale = getBaseScale();
     else if (anim.phase >= 5) state.scale = getMaxScaleToFit();
   }
@@ -675,9 +729,14 @@ const CAMERA_Z = -5;   // Place the logo in front of the camera.
 function getStageOffsetX() {
   const aspect = gl.canvas.width / gl.canvas.height;
   const visW = 2 * Math.abs(CAMERA_Z) * Math.tan(45 * Math.PI / 360) * aspect;
-  // Reserve 360px on the right for panel + drop shadow + comfort margin
-  const panelFraction = Math.min(0.42, 360 / Math.max(gl.canvas.width, 600));
+  const panelFraction = getPanelFraction();
   return -(visW * panelFraction * 0.5);
+}
+
+function getPanelFraction() {
+  const panels = document.getElementById("controlPanels");
+  const panelWidth = panels ? panels.offsetWidth + 24 : 600;
+  return Math.min(0.62, panelWidth / Math.max(gl.canvas.width, 600));
 }
 
 // Apply scale, rotation, and translation to the model in that order
@@ -768,7 +827,7 @@ function getBaseScale() {
   const aspect = gl.canvas.width / gl.canvas.height;
   const visH = 2 * Math.abs(CAMERA_Z) * Math.tan(45 * Math.PI / 360);
   const visW = visH * aspect;
-  const panelFraction = Math.min(0.42, 360 / Math.max(gl.canvas.width, 600));
+  const panelFraction = getPanelFraction();
   const availableWidth = visW * (1.0 - panelFraction);
 
   const effW = getWordWidth() * getDepthExpansionFactor();
@@ -785,7 +844,7 @@ function getMaxScaleToFit() {
   const aspect = gl.canvas.width / gl.canvas.height;
   const visH = 2 * Math.abs(CAMERA_Z) * Math.tan(45 * Math.PI / 360);
   const visW = visH * aspect;
-  const panelFraction = Math.min(0.42, 360 / Math.max(gl.canvas.width, 600));
+  const panelFraction = getPanelFraction();
   const availableWidth = visW * (1.0 - panelFraction);
 
   const effW = getWordWidth() * getDepthExpansionFactor();
@@ -812,13 +871,23 @@ function resetAnimationState() {
  * Handles animation path switching:
  * - "oval" (1): Resets to Phase 0 and plays all 6 intro phases before looping in oval.
  * - "bounce" (2) & "flip" (3): Jumps straight into continuous Phase 6 loop.
+ * - "playground": Stops playback and enables direct keyboard transforms.
  */
 function setAnimationPath(newPath) {
   params.animPath = newPath;
   const pathSelect = document.getElementById("selectAnimPath");
   if (pathSelect) pathSelect.value = newPath;
 
-  if (newPath === "oval") {
+  if (newPath === "playground") {
+    anim.phase = 0;
+    anim.t = 0;
+    anim.running = false;
+    _lastTimestamp = null;
+    resetAnimationState();
+    setControlsLocked(false);
+    setStatusBadge("playground", "PLAYGROUND");
+    if (pathSelect) pathSelect.blur();
+  } else if (newPath === "oval") {
     // Restart full 6-phase sequence from the beginning
     anim.phase = 0;
     anim.t = 0;
@@ -843,6 +912,7 @@ function setAnimationPath(newPath) {
     setControlsLocked(true);
     setStatusBadge("running", "RUNNING");
   }
+  updatePlaybackButtons();
   updatePhaseDisplay();
 }
 
@@ -903,7 +973,7 @@ function updateAnimation(timestamp) {
     const aspect = gl.canvas.width / gl.canvas.height;
     const visH = 2 * Math.abs(CAMERA_Z) * Math.tan(45 * Math.PI / 360);
     const visW = visH * aspect;
-    const panelFraction = Math.min(0.42, 360 / Math.max(gl.canvas.width, 600));
+    const panelFraction = getPanelFraction();
     const availableWidth = visW * (1.0 - panelFraction);
     const sMax = getMaxScaleToFit();
 
@@ -960,7 +1030,9 @@ function updatePhaseDisplay() {
   const el = document.getElementById("phaseDisplay");
   if (!el) return;
 
-  if (params.animPath === "bounce") {
+  if (params.animPath === "playground") {
+    el.textContent = "Playground: use keyboard controls";
+  } else if (params.animPath === "bounce") {
     el.textContent = "Path 2: Center Bounce (loop)";
   } else if (params.animPath === "flip") {
     el.textContent = "Path 3: Center Flip & Wave (loop)";
@@ -1000,9 +1072,12 @@ function initUI() {
   $("inputWord").addEventListener("input", e => {
     const sanitized = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
     if (sanitized.length > 0) {
+      e.target.value = sanitized;
       params.word = sanitized;
       renderPalettePickers(); // Rebuilds dynamic swatches to match letter count
       rebuildGeometry();
+    } else {
+      e.target.value = params.word.toUpperCase();
     }
   });
 
@@ -1058,6 +1133,7 @@ function initUI() {
 
   // 8. Playback Buttons with Status Badges and Parameter Locking
   $("btnStart").addEventListener("click", () => {
+    if (params.animPath === "playground") return;
     anim.running = true;
     _lastTimestamp = null;
     setControlsLocked(true);
@@ -1066,6 +1142,7 @@ function initUI() {
   });
 
   $("btnStop").addEventListener("click", () => {
+    if (params.animPath === "playground") return;
     anim.running = false;
     setControlsLocked(false);
     setStatusBadge("paused", "PAUSED");
@@ -1077,13 +1154,19 @@ function initUI() {
     anim.t = 0;
     anim.running = false;
     _lastTimestamp = null;
-    params.animPath = "oval";
-    if ($("selectAnimPath")) $("selectAnimPath").value = "oval";
     resetAnimationState();
     setControlsLocked(false);
-    setStatusBadge("ready", "READY");
+    if (params.animPath === "playground") {
+      setStatusBadge("playground", "PLAYGROUND");
+    } else {
+      params.animPath = "oval";
+      if ($("selectAnimPath")) $("selectAnimPath").value = "oval";
+      setStatusBadge("ready", "READY");
+    }
+    updatePlaybackButtons();
     updatePhaseDisplay();
   });
+  updatePlaybackButtons();
 }
 
 // Visual status badge helper
@@ -1093,6 +1176,19 @@ function setStatusBadge(className, label) {
     badge.className = "status-badge " + className;
     badge.textContent = label;
   }
+}
+
+function updatePlaybackButtons() {
+  const isPlayground = params.animPath === "playground";
+  const startButton = document.getElementById("btnStart");
+  const stopButton = document.getElementById("btnStop");
+  const resetButton = document.getElementById("btnReset");
+  const playgroundControls = document.getElementById("playgroundControls");
+
+  if (startButton) startButton.disabled = isPlayground;
+  if (stopButton) stopButton.disabled = isPlayground;
+  if (resetButton) resetButton.textContent = isPlayground ? "Reset View" : "Reset";
+  if (playgroundControls) playgroundControls.style.display = isPlayground ? "block" : "none";
 }
 
 // Lock/unlock geometry controls while animating to prevent visual glitches
@@ -1117,8 +1213,6 @@ function resetDefaults() {
   _lastTimestamp = null;
   resetAnimationState();
   setControlsLocked(false);
-  setStatusBadge("ready", "READY");
-  updatePhaseDisplay();
 
   // 2. Reset parameter values
   params.word = "meow";
@@ -1148,6 +1242,9 @@ function resetDefaults() {
   if ($("paletteColorRow")) $("paletteColorRow").style.display = "block";
   if ($("checkLighting")) $("checkLighting").checked = true;
   if (document.getElementById("selectAnimPath")) document.getElementById("selectAnimPath").value = "oval";
+  updatePlaybackButtons();
+  setStatusBadge("ready", "READY");
+  updatePhaseDisplay();
 
   // 4. Re-render UI color palette pickers and rebuild WebGL geometry
   renderPalettePickers();
@@ -1209,6 +1306,39 @@ function initExtensions() {
     // Avoid triggering controls while typing into the text field
     if (e.target && e.target.tagName === "INPUT" && e.target.type === "text") return;
 
+    if (params.animPath === "playground") {
+      if (e.code === "Space") {
+        e.preventDefault();
+        return;
+      }
+
+      const step = 0.1;
+      const key = e.key.toLowerCase();
+      let handled = true;
+      switch (e.key) {
+        case "ArrowUp": state.theta[0] -= 5; break;
+        case "ArrowDown": state.theta[0] += 5; break;
+        case "ArrowLeft": state.theta[1] -= 5; break;
+        case "ArrowRight": state.theta[1] += 5; break;
+        case "+":
+        case "=": state.scale = Math.min(getMaxScaleToFit() * 1.5, state.scale * 1.1); break;
+        case "-": state.scale = Math.max(getBaseScale() * 0.25, state.scale / 1.1); break;
+        default:
+          if (key === "w") state.translate[1] = Math.min(3, state.translate[1] + step);
+          else if (key === "s") state.translate[1] = Math.max(-3, state.translate[1] - step);
+          else if (key === "a") state.translate[0] = Math.max(-4, state.translate[0] - step);
+          else if (key === "d") state.translate[0] = Math.min(4, state.translate[0] + step);
+          else if (key === "r") resetAnimationState();
+          else handled = false;
+      }
+
+      if (handled) {
+        if (e.key.startsWith("Arrow")) e.preventDefault();
+        updatePhaseDisplay();
+        return;
+      }
+    }
+
     // --- Start / Pause: Space ---
     if (e.code === "Space") {
       e.preventDefault();
@@ -1229,6 +1359,7 @@ function initExtensions() {
       resetAnimationState();
       setControlsLocked(false);
       setStatusBadge("ready", "READY");
+      updatePlaybackButtons();
       updatePhaseDisplay();
     }
     // --- Restore All Settings: D ---
