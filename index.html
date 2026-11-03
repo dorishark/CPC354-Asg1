@@ -12,7 +12,7 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
     color: #f0f2f5;
   }
-  #glcanvas { display: block; width: 100vw; height: 100vh; }
+  #glcanvas { display: block; width: 100vw; height: 100vh; outline: none; }
 
   #controlPanels {
     position: fixed;
@@ -218,7 +218,7 @@
 </style>
 </head>
 <body>
-<canvas id="glcanvas"></canvas>
+<canvas id="glcanvas" tabindex="0" aria-label="3D logo playground. Use WASD to move the logo."></canvas>
 
 <div id="controlPanels">
 <!-- User Interface & Control Panel -->
@@ -314,7 +314,7 @@
         <option value="oval">1: Default</option>
         <option value="bounce">2: Bounce</option>
         <option value="flip">3: Flip & Wave</option>
-        <option value="playground">Playground</option>
+        <option value="playground">4: Playground</option>
       </select>
     </div>
     <div class="control-row">
@@ -335,12 +335,13 @@
     <div class="shortcuts-list">
       <div class="shortcut-item"><span>Start / Pause (not Playground)</span><kbd>Space</kbd></div>
       <div class="shortcut-item"><span>Reset Animation / View</span><kbd>R</kbd></div>
-      <div class="shortcut-item"><span>Choose sequence</span><kbd>1 / 2 / 3</kbd></div>
+      <div class="shortcut-item"><span>Choose sequence</span><kbd>1 / 2 / 3 / 4</kbd></div>
     </div>
   </div>
 
   <div id="playgroundControls" class="control-group playground-help" style="display: none;">
     <div class="group-title">Playground Controls</div>
+    <div class="input-hint">Click the 3D stage, then use the keyboard to move the logo.</div>
     <div class="shortcuts-list">
       <div class="shortcut-item"><span>Rotate up / down</span><kbd>↑ / ↓</kbd></div>
       <div class="shortcut-item"><span>Rotate left / right</span><kbd>← / →</kbd></div>
@@ -851,9 +852,9 @@ function getMaxScaleToFit() {
   const effW = getWordWidth() * getDepthExpansionFactor();
   const effH = getWordHeight() * getDepthExpansionFactor();
 
-  // Enlarge to at most 60% of available width and 50% of height
-  const sx = (availableWidth * 0.60) / effW;
-  const sy = (visH * 0.50) / effH;
+  // Enlarge to at most 78% of available width and 68% of height
+  const sx = (availableWidth * 0.78) / effW;
+  const sy = (visH * 0.68) / effH;
   return Math.min(sx, sy);
 }
 
@@ -888,6 +889,8 @@ function setAnimationPath(newPath) {
     setControlsLocked(false);
     setStatusBadge("playground", "PLAYGROUND");
     if (pathSelect) pathSelect.blur();
+    const canvas = document.getElementById("glcanvas");
+    if (canvas) canvas.focus();
   } else if (newPath === "oval") {
     // Restart full 6-phase sequence from the beginning
     anim.phase = 0;
@@ -1314,27 +1317,28 @@ function initExtensions() {
       }
 
       const step = 0.1;
-      const key = e.key.toLowerCase();
       let handled = true;
-      switch (e.key) {
+      switch (e.code) {
         case "ArrowUp": state.theta[0] -= 5; break;
         case "ArrowDown": state.theta[0] += 5; break;
         case "ArrowLeft": state.theta[1] -= 5; break;
         case "ArrowRight": state.theta[1] += 5; break;
-        case "+":
-        case "=": state.scale = Math.min(getMaxScaleToFit() * 1.5, state.scale * 1.1); break;
-        case "-": state.scale = Math.max(getBaseScale() * 0.25, state.scale / 1.1); break;
+        case "Equal":
+        case "NumpadAdd": state.scale = Math.min(getMaxScaleToFit() * 1.5, state.scale * 1.1); break;
+        case "Minus":
+        case "NumpadSubtract": state.scale = Math.max(getBaseScale() * 0.25, state.scale / 1.1); break;
+        case "KeyW": state.translate[1] = Math.min(3, state.translate[1] + step); break;
+        case "KeyS": state.translate[1] = Math.max(-3, state.translate[1] - step); break;
+        case "KeyA": state.translate[0] = Math.max(-4, state.translate[0] - step); break;
+        case "KeyD": state.translate[0] = Math.min(4, state.translate[0] + step); break;
+        case "KeyR": resetAnimationState(); break;
+        case "Digit4": setAnimationPath("playground"); break;
         default:
-          if (key === "w") state.translate[1] = Math.min(3, state.translate[1] + step);
-          else if (key === "s") state.translate[1] = Math.max(-3, state.translate[1] - step);
-          else if (key === "a") state.translate[0] = Math.max(-4, state.translate[0] - step);
-          else if (key === "d") state.translate[0] = Math.min(4, state.translate[0] + step);
-          else if (key === "r") resetAnimationState();
-          else handled = false;
+          handled = false;
       }
 
       if (handled) {
-        if (e.key.startsWith("Arrow")) e.preventDefault();
+        e.preventDefault();
         updatePhaseDisplay();
         return;
       }
@@ -1383,6 +1387,10 @@ function initExtensions() {
     // --- Animation Path 3 (Center Flip & Wave Loop): Key 3 ---
     else if (e.key === "3") {
       setAnimationPath("flip");
+    }
+    // --- Playground: Key 4 ---
+    else if (e.key === "4") {
+      setAnimationPath("playground");
     }
     // --- Extrusion Depth: [ / ] ---
     else if (e.key === "[" || e.key === "]") {
