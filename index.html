@@ -1075,13 +1075,21 @@ function initUI() {
   // 1. Text input listener (filters valid letters only)
   $("inputWord").addEventListener("input", e => {
     const sanitized = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    e.target.value = sanitized; // Update the input field with validated text
+
     if (sanitized.length > 0) {
-      e.target.value = sanitized;
-      params.word = sanitized;
-      renderPalettePickers(); // Rebuilds dynamic swatches to match letter count
-      rebuildGeometry();
-    } else {
-      e.target.value = params.word.toUpperCase();
+      params.word = sanitized; // Update the stored logo text
+      renderPalettePickers(); // Refresh colour pickers based on the number of the letters
+      rebuildGeometry(); // Rebuild the 3D logo using the updated text
+    }
+  });
+
+  // Restore previous valid text when the input field loses focus
+  $("inputWord").addEventListener("blur", e => {
+    if (e.target.value.trim().length === 0) {
+      e.target.value = params.word.toUpperCase(); // Restore the previous valid word
+      renderPalettePickers(); // Refresh the colour pickers
+      rebuildGeometry(); // Rebuild the 3D logo
     }
   });
 
