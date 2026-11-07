@@ -85,11 +85,8 @@ function getMoveLimits() {
   const k = Math.abs(CAMERA_Z) / Math.max(zFront, 0.1);
   const halfW = getWordWidth() * state.scale / 2;
   const halfH = getWordHeight() * state.scale / 2;
-  // The logo sits left of the window centre because of the panels, and k pushes
-  // it further left, so the left edge sets the limit.
-  const panelShift = (view.visW - view.freeW) / 2;
   return {
-    x: Math.max(0, view.freeW / (2 * k) - panelShift * (1 - 1 / k) - halfW - EDGE_MARGIN),
+    x: Math.max(0, view.freeW / (2 * k) - halfW - EDGE_MARGIN),
     y: Math.max(0, view.visH / (2 * k) - halfH - EDGE_MARGIN)
   };
 }

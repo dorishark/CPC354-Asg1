@@ -299,14 +299,7 @@ function resizeCanvas() {
 
 const CAMERA_Z = -5;   // Place the logo in front of the camera.
 
-// Calculate horizontal offset so the 3D stage centers in the open area left of the UI panel
-function getStageOffsetX() {
-  const aspect = gl.canvas.width / gl.canvas.height;
-  const visW = 2 * Math.abs(CAMERA_Z) * Math.tan(45 * Math.PI / 360) * aspect;
-  const panelFraction = getPanelFraction();
-  return -(visW * panelFraction * 0.5);
-}
-
+// Share of the canvas width covered by the control panels.
 function getPanelFraction() {
   const panels = document.getElementById("controlPanels");
   const panelWidth = panels ? panels.offsetWidth + 24 : 600;
@@ -315,8 +308,7 @@ function getPanelFraction() {
 
 // Apply scale, rotation, and translation to the model in that order
 function buildModelView() {
-  const stageX = getStageOffsetX();
-  let m = mat4Translate(state.translate[0] + stageX, state.translate[1], state.translate[2] + CAMERA_Z);
+  let m = mat4Translate(state.translate[0], state.translate[1], state.translate[2] + CAMERA_Z);
   m = mat4Mul(m, mat4RotateX(state.theta[0]));
   m = mat4Mul(m, mat4RotateY(state.theta[1]));
   m = mat4Mul(m, mat4RotateZ(state.theta[2]));
@@ -324,13 +316,20 @@ function buildModelView() {
   return m;
 }
 
+// Perspective projection shifted so the camera's centre is the middle of the free
+// area. The logo stays straight in front of the camera, so depth cannot pull it sideways.
+function buildProjection() {
+  const aspect = gl.canvas.width / gl.canvas.height;
+  const shift = mat4Translate(-getPanelFraction(), 0, 0); // clip space: canvas width is 2
+  return mat4Mul(shift, mat4Perspective(45, aspect, 0.1, 100));
+}
+
 function drawLogo() {
   const bg = hexToRgb(params.bgColor);
   gl.clearColor(bg[0], bg[1], bg[2], 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-  const aspect = gl.canvas.width / gl.canvas.height;
-  gl.uniformMatrix4fv(uProjection, false, mat4Perspective(45, aspect, 0.1, 100));
+  gl.uniformMatrix4fv(uProjection, false, buildProjection());
   gl.uniformMatrix4fv(uModelView, false, buildModelView());
   gl.uniform1i(uUseLighting, params.useLighting ? 1 : 0);
 
