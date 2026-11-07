@@ -71,9 +71,10 @@ function getBaseScale() {
   return Math.min(1.0, scaleToFit(0.46, 0.35));
 }
 
-// Full-screen size: the word uses at most 78% of the free width and 68% of the height.
+// Full-screen size: the word uses at most 70% of the free width and 61% of the height,
+// which leaves room for the oval movement.
 function getMaxScaleToFit() {
-  return scaleToFit(0.78, 0.68);
+  return scaleToFit(0.70, 0.61);
 }
 
 // How far the logo centre can move from the middle before its edge leaves the screen.
@@ -158,7 +159,7 @@ function updateAnimation(timestamp) {
 
   // When paused, step is 0: the logo stays still but still fits the screen.
   const step = anim.running ? dt * params.speed : 0;
-  anim.t += step;
+  anim.t += step; 
 
   switch (anim.phase) {
     case 0: // Hold at centre
@@ -219,12 +220,14 @@ function nextPhase() {
 // Path 1: float around an oval.
 function ovalLoop() {
   state.scale = getMaxScaleToFit();
-  const limit = getMoveLimits();
   // Grow the oval from the centre over the first 1.5 s so the logo does not jump.
   const grow = Math.min(anim.t / 1.5, 1);
+  const limit = getMoveLimits();
+  const radiusX = limit.x * 0.85;
+  const radiusY = Math.min(limit.y * 0.85, radiusX * 0.6); // keep the oval wider than tall
   const angle = anim.t * 2 * Math.PI / OVAL_SECS;
-  state.translate[0] = Math.cos(angle) * limit.x * 0.6 * grow;
-  state.translate[1] = Math.sin(angle) * limit.y * 0.6 * grow;
+  state.translate[0] = Math.cos(angle) * radiusX * grow;
+  state.translate[1] = Math.sin(angle) * radiusY * grow;
 }
 
 // Path 2: In-place Center Bounce (Oscillates strictly in the centre)
