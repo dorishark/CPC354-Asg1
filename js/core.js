@@ -1,7 +1,5 @@
 "use strict";
 
-/* Sections 1-3: shared state, matrix helpers, geometry, WebGL setup, render loop (Doris). */
-
 /* Transform state and user-adjustable settings. */
 
 // Current position, rotation, and scale of the logo.
